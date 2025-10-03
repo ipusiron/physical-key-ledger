@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta
+    name="viewport"
+    content="width=device-width,initial-scale=1,viewport-fit=cover"
+  />
+  <title>Physical Key Ledger</title>
+  <meta name="description" content="Physical Key Ledger - 物理鍵管理台帳">
+  <!-- Security Headers -->
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <meta http-equiv="X-Frame-Options" content="DENY">
+  <meta http-equiv="Referrer-Policy" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="icon" href="./assets/favicon.svg" />
+  <link rel="stylesheet" href="./css/style.css" />
+  <!-- QRCode.js CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
+  <!-- App scripts -->
+  <script src="./js/db.js" type="module"></script>
+  <script src="./js/logic.js" type="module"></script>
+  <script src="./js/ui.js" type="module"></script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-left"></div>
+    <div class="header-center">
+      <h1>Physical Key Ledger</h1>
+      <p class="header-tagline">物理鍵・ICカード・カードキーの貸出・返却を可視化し、紛失リスクを低減する管理台帳</p>
+    </div>
+    <div class="header-actions">
+      <button id="btn-help" class="btn btn-tertiary" aria-label="ヘルプ" title="ヘルプ">❓</button>
+      <button id="btn-theme" class="btn btn-tertiary" aria-label="テーマ切替" title="テーマ切替">
+        <span class="theme-icon">🌙</span>
+      </button>
+      <button id="btn-export" class="btn">エクスポート(JSON)</button>
+      <label class="import-label btn">
+        インポート(JSON 全置換)
+        <input id="file-import" type="file" accept="application/json" hidden />
+      </label>
+      <button id="btn-audit" class="btn btn-secondary">監査ログ</button>
+      <button id="btn-settings" class="btn btn-tertiary">設定</button>
+      <button id="btn-menu" class="btn btn-tertiary mobile-menu-btn" aria-label="メニュー">☰</button>
+    </div>
+  </header>
+
+  <!-- Mobile menu dropdown -->
+  <div id="mobile-menu" class="mobile-menu hidden">
+    <button id="btn-help-mobile" class="btn btn-tertiary">❓ ヘルプ</button>
+    <button id="btn-theme-mobile" class="btn btn-tertiary">
+      <span class="theme-icon">🌙</span> テーマ切替
+    </button>
+    <button id="btn-export-mobile" class="btn">エクスポート(JSON)</button>
+    <label class="import-label btn">
+      インポート(JSON 全置換)
+      <input id="file-import-mobile" type="file" accept="application/json" hidden />
+    </label>
+    <button id="btn-audit-mobile" class="btn btn-secondary">監査ログ</button>
+    <button id="btn-settings-mobile" class="btn btn-tertiary">設定</button>
+  </div>
+
+  <main class="container">
+    <!-- DASHBOARD -->
+    <section class="card" id="dashboard">
+      <div class="card-header">
+        <h2>ダッシュボード</h2>
+        <div class="kpi">
+          <div class="kpi-item">
+            <div>総鍵数</div>
+            <span id="kpi-total">0</span>
+          </div>
+          <div class="kpi-item">
+            <div>貸出中</div>
+            <span id="kpi-loaned">0</span>
+          </div>
+          <div class="kpi-item warn">
+            <div>期限超過</div>
+            <span id="kpi-overdue">0</span>
+          </div>
+          <div class="kpi-item warn">
+            <div>多重貸出(>3)</div>
+            <span id="kpi-multi">0</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body grid-2">
+        <div>
+          <h3>期限超過（返却期限を過ぎて未返却）</h3>
+          <ul id="list-overdue" class="bullet-list"></ul>
+        </div>
+        <div>
+          <h3>多重貸出（同一借主が4本以上保持）</h3>
+          <ul id="list-multi" class="bullet-list"></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- KEYS TABLE -->
+    <section class="card" id="keys">
+      <div class="card-header">
+        <h2>鍵一覧</h2>
+        <div class="row">
+          <input id="search" type="search" class="input" placeholder="検索（ID/名称/場所/借主）">
+          <select id="filter-category" class="input">
+            <option value="">すべてのカテゴリー</option>
+            <option value="physical-key">🔑 物理鍵</option>
+            <option value="ic-card">💳 ICカード</option>
+            <option value="card-key">🎫 カードキー</option>
+          </select>
+          <select id="filter-status" class="input">
+            <option value="">すべての状態</option>
+            <option value="stored">保管中</option>
+            <option value="loaned">貸出中</option>
+            <option value="retired">廃止</option>
+          </select>
+          <button id="btn-new-key" class="btn primary">新規登録</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="table-wrapper">
+          <table class="table" id="tbl-keys" aria-label="鍵一覧">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>カテゴリー</th>
+                <th>名称</th>
+                <th>種別</th>
+                <th>状態</th>
+                <th>保管場所</th>
+                <th>貸出先</th>
+                <th>返却期限</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-keys">
+              <!-- rows -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- KEY MODAL -->
+  <dialog id="dlg-key">
+    <form id="form-key" method="dialog" class="modal">
+      <h3 id="dlg-key-title">鍵の登録/編集</h3>
+      <div class="grid-2">
+        <label>
+          <span>表示ID（物理タグ/カード番号）<span class="required">*</span></span>
+          <input name="id" class="input" placeholder="KEY-001" required>
+        </label>
+        <label>
+          <span>名称<span class="required">*</span></span>
+          <input name="name" class="input" placeholder="研究室入口" required>
+        </label>
+        <label>カテゴリー
+          <select name="category" class="input" id="key-category">
+            <option value="physical-key">🔑 物理鍵</option>
+            <option value="ic-card">💳 ICカード</option>
+            <option value="card-key">🎫 カードキー</option>
+          </select>
+        </label>
+        <label>種別
+          <select name="type" class="input" id="key-type">
+            <option value="master">マスターキー</option>
+            <option value="original">純正キー</option>
+            <option value="spare">スペアキー</option>
+          </select>
+        </label>
+        <label>状態
+          <select name="status" class="input">
+            <option value="stored">保管中</option>
+            <option value="loaned">貸出中</option>
+            <option value="retired">廃止</option>
+          </select>
+        </label>
+        <label>保管場所
+          <input name="location" class="input" placeholder="2F廊下キャビネット">
+        </label>
+      </div>
+
+      <!-- Card-specific fields (conditional) -->
+      <div id="card-fields" class="grid-2" style="display: none;">
+        <label>カード番号（任意）
+          <input name="cardNumber" class="input" placeholder="12345678">
+        </label>
+        <label>アクセスレベル（任意）
+          <input name="accessLevel" class="input" placeholder="standard">
+        </label>
+        <label>有効期限（開始）
+          <div class="input-with-icon">
+            <span class="input-icon">📅</span>
+            <input name="validFrom" class="input input-datetime" type="datetime-local" placeholder="クリックして日時を選択">
+          </div>
+        </label>
+        <label>有効期限（終了）
+          <div class="input-with-icon">
+            <span class="input-icon">📅</span>
+            <input name="validUntil" class="input input-datetime" type="datetime-local" placeholder="クリックして日時を選択">
+          </div>
+        </label>
+      </div>
+
+      <div class="grid-2">
+        <label>メモ
+          <input name="notes" class="input" placeholder="夜間は貸出不可">
+        </label>
+      </div>
+
+      <div class="qr-block">
+        <h4>QRコード（印刷用）</h4>
+        <div id="qr" class="qr"></div>
+        <div class="row">
+          <button id="btn-qrid" class="btn btn-tertiary" type="button">IDで生成</button>
+          <button id="btn-qruuid" class="btn btn-tertiary" type="button">UUIDで生成</button>
+          <button id="btn-qr-download" class="btn" type="button">PNG保存</button>
+        </div>
+        <div id="qr-info" class="qr-info"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button id="btn-key-delete" class="btn btn-danger btn-delete" type="button">
+          <span class="delete-icon">🗑️</span> この鍵を削除
+        </button>
+        <menu class="modal-actions">
+          <button value="cancel" class="btn btn-tertiary" type="button" onclick="this.closest('dialog').close()">キャンセル</button>
+          <button id="btn-key-save" class="btn primary" type="submit">保存</button>
+        </menu>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- LOAN MODAL -->
+  <dialog id="dlg-loan">
+    <form id="form-loan" method="dialog" class="modal">
+      <h3>貸出登録</h3>
+      <div class="grid-2">
+        <label>鍵ID
+          <input name="keyId" class="input" readonly>
+        </label>
+        <label>
+          <span>借主識別子<span class="required">*</span></span>
+          <input name="borrower" class="input" placeholder="emp-12345 or T.Yamada" required>
+        </label>
+      </div>
+      <div class="grid-2">
+        <label>返却期限
+          <div class="input-with-icon">
+            <span class="input-icon">📅</span>
+            <input name="dueAt" class="input input-datetime" type="datetime-local" placeholder="クリックして日時を選択">
+          </div>
+          <small class="input-hint">カレンダーから日時を選択できます</small>
+        </label>
+        <label>メモ（貸出）
+          <input name="outNotes" class="input" placeholder="日中点検">
+        </label>
+      </div>
+      <menu class="modal-actions">
+        <button value="cancel" class="btn btn-tertiary" type="button" onclick="this.closest('dialog').close()">キャンセル</button>
+        <button id="btn-loan-save" class="btn primary" type="submit">登録</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <!-- RETURN MODAL -->
+  <dialog id="dlg-return">
+    <form id="form-return" method="dialog" class="modal">
+      <h3>回収登録</h3>
+      <div class="grid-2">
+        <label>鍵ID
+          <input name="keyId" class="input" readonly>
+        </label>
+        <label>借主（参考）
+          <input name="borrower" class="input" readonly>
+        </label>
+        <label>返却メモ
+          <input name="inNotes" class="input" placeholder="破損なし">
+        </label>
+      </div>
+      <menu class="modal-actions">
+        <button value="cancel" class="btn btn-tertiary" type="button" onclick="this.closest('dialog').close()">キャンセル</button>
+        <button id="btn-return-save" class="btn primary" type="submit">回収</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <!-- AUDIT MODAL -->
+  <dialog id="dlg-audit">
+    <div class="modal">
+      <h3>監査ログ（最新が上）</h3>
+      <div class="audit-box" id="audit-box"></div>
+      <menu class="modal-actions">
+        <button id="btn-audit-download" class="btn">JSONLダウンロード</button>
+        <button id="btn-audit-close" class="btn btn-tertiary">閉じる</button>
+      </menu>
+    </div>
+  </dialog>
+
+  <!-- SETTINGS MODAL -->
+  <dialog id="dlg-settings">
+    <form id="form-settings" method="dialog" class="modal">
+      <h3>設定</h3>
+      <div class="grid-2">
+        <label>プロフィール名（ログのactor）
+          <input name="profileName" class="input" placeholder="local-admin">
+        </label>
+        <label>多重貸出しきい値（固定値推奨）
+          <input name="multiThreshold" class="input" type="number" min="2" value="4">
+        </label>
+      </div>
+      <menu class="modal-actions">
+        <button value="cancel" class="btn btn-tertiary" type="button" onclick="this.closest('dialog').close()">閉じる</button>
+        <button id="btn-settings-save" class="btn primary" type="submit">保存</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <!-- HELP MODAL -->
+  <dialog id="dlg-help">
+    <div class="modal modal-help">
+      <h3>📖 ヘルプ - Physical Key Ledger の使い方</h3>
+      <div class="help-content">
+        <section class="help-section">
+          <h4>🔰 基本的な使い方</h4>
+          <ol>
+            <li><strong>鍵を登録する</strong><br>
+              「新規登録」ボタンから、カテゴリー（物理鍵/ICカード/カードキー）を選択し、情報を入力します。<br>
+              IDは物理タグ番号（例: KEY-001）として管理します。<br>
+              <span class="required">*</span>マークは必須入力項目です。</li>
+            <li><strong>ICカード・カードキーの場合</strong><br>
+              カテゴリー選択後、カード番号・アクセスレベル・有効期限などの追加フィールドが表示されます（任意）。<br>
+              種別も自動的にカテゴリーに応じた選択肢に切り替わります。</li>
+            <li><strong>鍵を貸し出す</strong><br>
+              鍵一覧から「貸出」ボタンをクリックし、借主識別子<span class="required">*</span>と返却期限を入力します。<br>
+              返却期限はカレンダーから選択できます（任意）。</li>
+            <li><strong>鍵を回収する</strong><br>
+              貸出中の鍵の「回収」ボタンをクリックし、返却メモを入力します。<br>
+              状態が自動的に「保管中」に戻ります。</li>
+            <li><strong>鍵を検索・フィルターする</strong><br>
+              検索欄にID、名称、場所、借主を入力して絞り込めます。<br>
+              カテゴリーフィルターで「物理鍵」「ICカード」「カードキー」を選択できます。<br>
+              状態ドロップダウンで「保管中」「貸出中」「廃止」を選択できます。</li>
+          </ol>
+        </section>
+
+        <section class="help-section">
+          <h4>🔄 鍵のライフサイクル</h4>
+          <div class="lifecycle">
+            <div class="lifecycle-step">
+              <strong>1. 登録</strong><br>
+              新しい鍵を台帳に追加（初期状態: 保管中）
+            </div>
+            <div class="lifecycle-arrow">↓</div>
+            <div class="lifecycle-step">
+              <strong>2. 貸出</strong><br>
+              借主に貸し出し（状態: 保管中 → 貸出中）
+            </div>
+            <div class="lifecycle-arrow">↓</div>
+            <div class="lifecycle-step">
+              <strong>3. 回収</strong><br>
+              返却を記録（状態: 貸出中 → 保管中）
+            </div>
+            <div class="lifecycle-arrow">↓</div>
+            <div class="lifecycle-step">
+              <strong>4. 廃止（任意）</strong><br>
+              紛失や破損時に状態を「廃止」に変更
+            </div>
+          </div>
+        </section>
+
+        <section class="help-section">
+          <h4>⚠️ 運用上の注意事項</h4>
+          <ul>
+            <li><strong>データ保存場所</strong><br>
+              すべてのデータはブラウザーのIndexedDBに保存されます。<br>
+              異なるブラウザーや端末では共有されません。</li>
+            <li><strong>バックアップの重要性</strong><br>
+              定期的に「エクスポート(JSON)」でデータをバックアップしてください。<br>
+              ブラウザーのキャッシュクリアでデータが消失する可能性があります。</li>
+            <li><strong>貸出中の鍵は削除不可</strong><br>
+              貸出中の鍵を削除するには、先に回収登録を行ってください。</li>
+            <li><strong>インポートは全置換</strong><br>
+              JSONインポートは既存データを完全に置き換えます。<br>
+              事前にエクスポートでバックアップを取ることを推奨します。</li>
+            <li><strong>期限超過の監視</strong><br>
+              ダッシュボードで期限超過や多重貸出を確認できます。<br>
+              定期的にチェックして運用リスクを低減してください。</li>
+          </ul>
+        </section>
+
+        <section class="help-section">
+          <h4>🏷️ QRコードの活用</h4>
+          <ul>
+            <li><strong>QRコード生成</strong><br>
+              鍵の編集画面で「IDで生成」または「UUIDで生成」ボタンをクリック。<br>
+              生成されたQRコードの下に、埋め込まれたURL情報が表示されます。</li>
+            <li><strong>印刷と貼付</strong><br>
+              「PNG保存」ボタンでQRコード画像を保存し、物理タグやラベルに印刷して鍵に貼付。</li>
+            <li><strong>スマホでスキャン</strong><br>
+              スマホのQRコードリーダーでスキャンすると、自動的にその鍵の詳細画面（編集モーダル）が開きます。<br>
+              例: <code>?id=KEY-001</code> または <code>?key=uuid</code></li>
+            <li><strong>2種類のQRコード</strong><br>
+              「IDで生成」: タグ番号で検索（例: KEY-001）<br>
+              「UUIDで生成」: 内部IDで検索（タグ番号変更にも対応）</li>
+          </ul>
+        </section>
+
+        <section class="help-section">
+          <h4>📊 監査ログ</h4>
+          <ul>
+            <li>すべての操作履歴が自動記録されます</li>
+            <li>鍵の登録・編集・削除、貸出・回収、インポートなど</li>
+            <li>JSON Lines形式でダウンロード可能</li>
+          </ul>
+        </section>
+
+        <section class="help-section">
+          <h4>💡 Tips</h4>
+          <ul>
+            <li><strong>カテゴリーと種別</strong><br>
+              物理鍵: マスターキー/純正キー/スペアキー<br>
+              ICカード: 社員証/訪問者カード/業者カード/一時カード/その他<br>
+              カードキー: 客室キー/入館証/駐車場カード/ロッカーキー/その他</li>
+            <li><strong>相対時間表示</strong><br>
+              返却期限を「3時間後」「2日前」など相対的に表示</li>
+            <li><strong>テーマ切替</strong><br>
+              ヘッダー右上のボタン（🌙/☀️）でダーク/ライトモードを変更可能</li>
+            <li><strong>設定のカスタマイズ</strong><br>
+              プロフィール名や多重貸出しきい値を変更可能</li>
+            <li><strong>カテゴリーフィルター</strong><br>
+              鍵一覧でカテゴリー別に絞り込み可能</li>
+          </ul>
+        </section>
+      </div>
+      <menu class="modal-actions">
+        <button id="btn-help-close" class="btn primary" type="button">閉じる</button>
+      </menu>
+    </div>
+  </dialog>
+
+  <footer class="app-footer">
+    <div class="footer">
+      🔗 GitHubリポジトリはこちら（ <a href="https://github.com/ipusiron/physical-key-ledger" target="_blank" rel="noopener">ipusiron/physical-key-ledger</a> ）
+    </div>
+  </footer>
+</body>
+</html>
