@@ -517,7 +517,7 @@ demo: https://ipusiron.github.io/physical-key-ledger/
 
 ```
 physical-key-ledger/
-├── index.html              # メインHTMLファイル
+├── index.html             # メインHTMLファイル
 ├── css/
 │   └── style.css          # スタイルシート（ダーク/ライトモード対応）
 ├── js/
