@@ -40,10 +40,12 @@ Physical Key Ledger is a browser-based physical key management application built
 
 ### Data Model
 
-- **Key**: `{ uuid, id, name, type, status, location, notes, createdAt, updatedAt }`
+- **Key**: `{ uuid, id, name, category, type, status, location, notes, createdAt, updatedAt }`
   - `uuid`: internal identifier (persistent across ID changes)
   - `id`: user-facing physical tag number (e.g., "KEY-001")
+  - `category`: "physical-key" | "ic-card" | "card-key"
   - `status`: "stored" | "loaned" | "retired"
+  - IC cards and card keys have additional fields: `cardNumber`, `accessLevel`, `validFrom`, `validUntil`
 
 - **Loan**: `{ loanId, keyUuid, borrower, loanedAt, dueAt, returnedAt, outNotes, inNotes }`
   - Active loan: `returnedAt == null`
@@ -51,6 +53,13 @@ Physical Key Ledger is a browser-based physical key management application built
 
 - **Audit**: `{ ts, actor, action, entityId, diff }`
   - Actions: "key.create", "key.update", "key.delete", "loan.create", "loan.return", "import"
+
+### Category-Type Mapping
+
+Types change dynamically based on selected category (ui.js:204-224):
+- **physical-key**: master, original, spare
+- **ic-card**: employee, visitor, contractor, temporary, other
+- **card-key**: room-key, access-card, parking-card, locker-key, other
 
 ### Key Constraints
 
@@ -63,7 +72,8 @@ Physical Key Ledger is a browser-based physical key management application built
 ## Important Conventions
 
 - All timestamps stored as milliseconds (`Date.now()`)
-- UUID generation uses crypto.getRandomValues (logic.js:55-58)
-- Loan IDs follow format: `L-YYYYMMDD-HHMMSS-xxxx`
+- UUID generation uses crypto.getRandomValues (logic.js:66-70)
+- Loan IDs follow format: `L-YYYYMMDD-HHMMSS-xxxx` (logic.js:71-76)
 - Japanese UI text; comments and code in English
 - No build tools, no npm, no bundler - pure vanilla JS modules
+- Theme stored in localStorage, other settings in IndexedDB `meta` store

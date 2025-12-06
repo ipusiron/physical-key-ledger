@@ -1,11 +1,38 @@
 <!--
 ---
-title: Physical Key Ledger
-category: physical-security
+id: day087
+slug: physical-key-ledger
+
+title: "Physical Key Ledger"
+
+subtitle_ja: "物理鍵管理台帳"
+subtitle_en: "Physical Key Management Ledger"
+
+description_ja: "物理鍵・ICカード・カードキーの貸出・回収を可視化し、紛失リスクを低減するWebアプリ。監査ログ・QRコード連携・アノマリー検知機能を搭載。"
+description_en: "Web app to visualize physical key, IC card, and card key loans/returns, reducing loss risk. Features audit logs, QR code integration, and anomaly detection."
+
+category_ja:
+  - 物理的セキュリティ
+  - 錠前
+category_en:
+  - Physical Security
+  - Lock
+
 difficulty: 2
-description: Lightweight web-based ledger for managing physical keys: track loans, returns, and anomalies with QR tag support.
-tags: [physical-security, key-management, ledger, education, javascript]
-demo: https://ipusiron.github.io/physical-key-ledger/
+
+tags:
+  - physical-security
+  - key-management
+  - audit-log
+  - qr-code
+  - anomaly-detection
+  - indexeddb
+  - vanilla-javascript
+
+repo_url: "https://github.com/ipusiron/physical-key-ledger"
+demo_url: "https://ipusiron.github.io/physical-key-ledger/"
+
+hub: true
 ---
 -->
 
