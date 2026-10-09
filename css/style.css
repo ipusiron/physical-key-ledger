@@ -206,6 +206,11 @@ a { color: var(--accent); }
 .card-body { padding: 16px; }
 .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+/* Search and the two filters share one line on wide screens and wrap on
+   narrow ones. Without this, .input { width: 100% } puts each on its own
+   line and pushes the table below the fold. */
+#keys .card-header .row .input { width: auto; flex: 1 1 200px; }
+#keys .card-header .row .btn { flex: 0 0 auto; }
 
 .kpi { display: flex; gap: 16px; flex-wrap: wrap; }
 .kpi-item {
