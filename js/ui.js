@@ -257,7 +257,7 @@ function openKeyModal(newKey = true, keyObj = null) {
 }
 
 function clearQR() {
-  els.qrBox.innerHTML = "";
+  els.qrBox.replaceChildren();
   els.qrInfo.textContent = "";
   els.qrInfo.classList.remove("show");
   qrInstance = null;
@@ -271,16 +271,60 @@ function ensureQR() {
     qrInstance = new QRCode(els.qrBox, { text: "", width: 170, height: 170 });
   }
 }
-function makeQrContentId() {
-  const id = field(els.formKey, "id").value.trim();
+// The key is put in the fragment (#), which browsers do not send to the
+// server. With "?" the key ID would appear in the access log of whoever
+// hosts the page.
+function qrUrl(name, value) {
   const url = new URL(location.href);
-  url.searchParams.set("id", id);
+  url.search = "";
+  url.hash = `${name}=${encodeURIComponent(value)}`;
   return url.toString();
 }
+function makeQrContentId() {
+  return qrUrl("id", field(els.formKey, "id").value.trim());
+}
 function makeQrContentUuid() {
+  return qrUrl("key", currentKeyUuid);
+}
+
+// Reads #id= / #key= first and still understands the older ?id= / ?key=
+// links printed on existing labels.
+function readDeepLink() {
   const url = new URL(location.href);
-  url.searchParams.set("key", currentKeyUuid);
-  return url.toString();
+  const hash = new URLSearchParams(url.hash.replace(/^#/, ""));
+  return {
+    id: hash.get("id") ?? url.searchParams.get("id"),
+    key: hash.get("key") ?? url.searchParams.get("key"),
+    hasQuery: url.search.length > 0 || url.hash.length > 0
+  };
+}
+
+const NOT_ON_THIS_DEVICE =
+  "台帳データは端末ごとに保存されるため、登録した端末・ブラウザーで開いてください。";
+
+// Opens the key named by the current URL, then takes it out of the address bar.
+async function handleDeepLink() {
+  const link = readDeepLink();
+  if (link.id != null) {
+    const key = await dbApi.getKeyById(state.db, link.id);
+    if (key) openKeyModal(false, key);
+    else alert([`鍵ID「${link.id}」はこの端末の台帳にありません。`, NOT_ON_THIS_DEVICE].join("\n"));
+  } else if (link.key != null) {
+    const key = await dbApi.getKeyByUuid(state.db, link.key);
+    if (key) openKeyModal(false, key);
+    else alert([`鍵UUID「${link.key}」はこの端末の台帳にありません。`, NOT_ON_THIS_DEVICE].join("\n"));
+  }
+  if (link.hasQuery) clearDeepLink();
+}
+
+// Removes the key from the address bar and from the back/forward history.
+// The browser history of the visit itself still holds the original URL.
+function clearDeepLink() {
+  try {
+    history.replaceState(null, "", location.pathname);
+  } catch {
+    // Some sandboxes block replaceState; the page still works.
+  }
 }
 function downloadQrPng() {
   const img = els.qrBox.querySelector("img") || els.qrBox.querySelector("canvas");
@@ -342,25 +386,11 @@ window.addEventListener("DOMContentLoaded", async () => {
   applyTheme();
   updateThemeIcon();
 
-  // Auto-open key detail from URL params (?id=KEY-001 or ?key=uuid)
-  const url = new URL(location.href);
-  if (url.searchParams.has("id")) {
-    const keyId = url.searchParams.get("id");
-    const key = await dbApi.getKeyById(state.db, keyId);
-    if (key) {
-      openKeyModal(false, key);
-    } else {
-      alert(`鍵ID「${keyId}」が見つかりませんでした。`);
-    }
-  } else if (url.searchParams.has("key")) {
-    const keyUuid = url.searchParams.get("key");
-    const key = await dbApi.getKeyByUuid(state.db, keyUuid);
-    if (key) {
-      openKeyModal(false, key);
-    } else {
-      alert(`鍵UUID「${keyUuid}」が見つかりませんでした。`);
-    }
-  }
+  // Auto-open the key detail from a scanned label (#id=KEY-001 or #key=uuid)
+  await handleDeepLink();
+  // A label scanned while the page is already open only changes the
+  // fragment, which does not reload the document.
+  window.addEventListener("hashchange", () => { handleDeepLink(); });
 
   // Render
   await rerenderAll();
