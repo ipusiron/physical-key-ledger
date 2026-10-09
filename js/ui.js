@@ -457,9 +457,13 @@ function breakReason(b) {
 // One line describing the verification result.
 function chainSummary(r) {
   if (r.total === 0) return t(lang, "chain.empty");
-  if (r.checked === 0) return fmt(lang, "chain.all_unchained", { total: r.total });
+  // English needs the singular for a single entry
+  const one = (key, n) => `${key}${n === 1 ? "_one" : ""}`;
+  if (r.checked === 0) {
+    return fmt(lang, one("chain.all_unchained", r.total), { total: r.total });
+  }
   const skipped = r.unchained > 0 ? fmt(lang, "chain.skipped", { n: r.unchained }) : "";
-  if (r.ok) return fmt(lang, "chain.ok", { checked: r.checked, skipped });
+  if (r.ok) return fmt(lang, one("chain.ok", r.checked), { checked: r.checked, skipped });
   const first = r.breaks[0];
   return fmt(lang, "chain.ng",
     { checked: r.checked, skipped, where: breakWhere(first), reason: breakReason(first) });
