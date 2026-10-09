@@ -2,7 +2,7 @@
 import {
   initLogic, refreshCache, state, upsertKey, deleteKey,
   createLoan, returnLoanByKeyUuid, detectOverdue, detectMultiHolding, kpi,
-  exportJson, importJsonFile, getAuditLog, saveSettings,
+  exportJson, importJsonFile, getAuditLog, saveSettings, verifyAuditChain,
   genUuid, toggleTheme, applyTheme
 } from "./logic.js";
 import { dbApi } from "./db.js";
@@ -12,6 +12,7 @@ import {
   multiHoldingLabel, multiHoldingHeading
 } from "./display.js";
 import { overdueHours } from "./anomaly.js";
+import { describeResult, REASON_LABELS } from "./audit-chain.js";
 
 // Elements
 const els = {
@@ -61,6 +62,8 @@ const els = {
 
   dlgAudit: document.getElementById("dlg-audit"),
   auditBox: document.getElementById("audit-box"),
+  btnChainVerify: document.getElementById("btn-chain-verify"),
+  chainResult: document.getElementById("chain-result"),
   btnAuditDownload: document.getElementById("btn-audit-download"),
   btnAuditClose: document.getElementById("btn-audit-close"),
 
@@ -361,7 +364,47 @@ async function openAuditModal() {
   const logs = await getAuditLog(1000);
   const lines = logs.map(l => JSON.stringify(l)).join("\n");
   els.auditBox.textContent = lines || "(ログなし)";
+  // The result belongs to the moment it was produced, so it does not
+  // survive reopening the dialog.
+  clearChainResult();
   els.dlgAudit.showModal();
+}
+
+function clearChainResult() {
+  els.chainResult.replaceChildren();
+  els.chainResult.classList.remove("ok", "ng");
+}
+
+// Recomputes the hash chain and reports what it found.
+async function runChainVerification() {
+  const r = await verifyAuditChain();
+  els.chainResult.replaceChildren();
+  els.chainResult.classList.toggle("ok", r.ok);
+  els.chainResult.classList.toggle("ng", !r.ok);
+
+  const summary = document.createElement("p");
+  summary.className = "chain-summary";
+  summary.textContent = `${r.ok ? "✅" : "⚠"} ${describeResult(r)}`;
+  els.chainResult.appendChild(summary);
+
+  // With a single break the summary already names it, so a list would
+  // only repeat the same line.
+  if (r.breaks.length > 1) {
+    const ul = document.createElement("ul");
+    ul.className = "bullet-list";
+    for (const b of r.breaks.slice(0, 10)) {
+      const li = document.createElement("li");
+      const where = b.seq == null ? "位置不明" : `seq ${b.seq}`;
+      li.textContent = `${where}: ${REASON_LABELS[b.reason] || b.reason}`;
+      ul.appendChild(li);
+    }
+    els.chainResult.appendChild(ul);
+    if (r.breaks.length > 10) {
+      const more = document.createElement("p");
+      more.textContent = `ほか ${r.breaks.length - 10} 件`;
+      els.chainResult.appendChild(more);
+    }
+  }
 }
 
 // ============ Settings modal ============
@@ -544,6 +587,16 @@ window.addEventListener("DOMContentLoaded", async () => {
   els.fileImport.addEventListener("change", (e) => handleImportFile(e, false));
   els.btnAudit.addEventListener("click", openAuditModal);
   els.btnAuditClose.addEventListener("click", () => els.dlgAudit.close());
+  els.btnChainVerify.addEventListener("click", async () => {
+    els.btnChainVerify.disabled = true;
+    try {
+      await runChainVerification();
+    } catch (err) {
+      alert(["整合性の検証に失敗しました", err.message || String(err)].join("\n"));
+    } finally {
+      els.btnChainVerify.disabled = false;
+    }
+  });
   els.btnAuditDownload.addEventListener("click", async () => {
     const logs = await getAuditLog(100000);
     const blob = new Blob(

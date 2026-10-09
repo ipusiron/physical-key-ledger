@@ -515,6 +515,27 @@ dialog::backdrop { background: rgba(0,0,0,.6); }
   white-space: pre-wrap;
 }
 
+.audit-note {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.chain-result {
+  margin: 0 0 12px;
+  padding: 0;
+}
+.chain-result:not(:empty) {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.chain-result.ok { border-color: var(--ok); }
+.chain-result.ng { border-color: var(--warn); }
+.chain-result p { margin: 0; }
+.chain-result .bullet-list { margin-top: 8px; }
+.chain-summary { font-weight: 600; }
+
 .modal-help {
   max-width: min(800px, 92vw);
   max-height: 85vh;

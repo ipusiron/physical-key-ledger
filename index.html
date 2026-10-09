@@ -296,8 +296,14 @@
   <dialog id="dlg-audit">
     <div class="modal">
       <h3>監査ログ（最新が上）</h3>
+      <p class="audit-note">
+        各エントリーは直前のエントリーのハッシュを含めて封じています（SHA-256）。
+        書き換え・削除・挿入・並べ替えは「整合性を検証」で検出できます。
+      </p>
+      <div id="chain-result" class="chain-result" role="status" aria-live="polite"></div>
       <div class="audit-box" id="audit-box"></div>
       <menu class="modal-actions">
+        <button id="btn-chain-verify" class="btn btn-secondary">整合性を検証</button>
         <button id="btn-audit-download" class="btn">JSONLダウンロード</button>
         <button id="btn-audit-close" class="btn btn-tertiary">閉じる</button>
       </menu>

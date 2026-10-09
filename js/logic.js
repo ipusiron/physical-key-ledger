@@ -1,8 +1,12 @@
 // logic.js - stateful domain layer. Pure calculations live in
 // display.js / anomaly.js / validate.js so that they can be tested with node.
-import { openDB, dbApi } from "./db.js";
+import { openDB, dbApi, CHAIN_HEAD_KEY } from "./db.js";
+import { sealEntry, verifyChain } from "./audit-chain.js";
 import * as anomaly from "./anomaly.js";
 import { validateDataset, validateKeyInput, validateLoanInput, isUuid } from "./validate.js";
+
+// Every audit entry is sealed into the hash chain before it is stored.
+const sealAudit = sealEntry;
 
 export const state = {
   db: null,
@@ -232,10 +236,13 @@ export async function getAuditLogAsc(limit = 100000) {
   return dbApi.getAllAuditAsc(state.db, limit);
 }
 
-// Hook for the audit hash chain (filled in by audit-chain.js).
-let sealAudit = null;
-export function setAuditSealer(fn) {
-  sealAudit = fn;
+// Recomputes the whole chain and compares it with the head kept in settings.
+export async function verifyAuditChain() {
+  const [entries, head] = await Promise.all([
+    dbApi.getAllAuditAsc(state.db),
+    dbApi.getSetting(state.db, CHAIN_HEAD_KEY)
+  ]);
+  return verifyChain(entries, head);
 }
 
 // settings

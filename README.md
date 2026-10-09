@@ -603,18 +603,22 @@ physical-key-ledger/
 │   └── style.css                 # 配色（CSS変数）・レイアウト・ライト/ダーク
 ├── js/                           # アプリケーション本体（ES Modules）
 │   ├── anomaly.js                # 異常検知とKPIの計算（DOM非依存の純粋関数）
+│   ├── audit-chain.js            # 監査ログのハッシュチェーンと検証（純粋関数）
 │   ├── db.js                     # IndexedDB（スキーマv3、鍵・貸出・監査ログ・設定）
 │   ├── display.js                # ラベル・相対時間・日時入力の変換（純粋関数）
 │   ├── logic.js                  # 台帳の操作（登録・貸出・回収・入出力・設定）
+│   ├── sha256.js                 # SHA-256の実装（依存なし・同期）
 │   ├── ui.js                     # 画面の組み立てとイベント処理
 │   └── validate.js               # インポートとフォーム入力の検査（純粋関数）
 ├── test/                         # 自動テスト（node:test、依存なし）
 │   ├── anomaly.test.js           # 異常検知とKPIの期待値
+│   ├── audit-chain.test.js       # 改ざん・削除・挿入・末尾切りの検出
 │   ├── contrast.test.js          # 配色のコントラスト比と操作要素の寸法
 │   ├── display.test.js           # ラベル・相対時間・日時の往復
 │   ├── format.test.js            # ソースの行長・行数・不可視文字
 │   ├── html.test.js              # CSP・インライン属性・aria・主要なid
 │   ├── readme.test.js            # READMEの表・ツリー・画像参照・表記
+│   ├── sha256.test.js            # NISTのテストベクターとnode:cryptoとの一致
 │   └── validate.test.js          # 不正なインポートデータの拒否
 ├── vendor/                       # 同梱した外部ライブラリー
 │   ├── LICENSE-qrcodejs.txt      # QRCode.js のライセンス（MIT）
@@ -657,11 +661,13 @@ npm test     # node --test
 | テスト | 検証する内容 |
 |---|---|
 | `test/anomaly.test.js` | 期限超過・多重保持・期限切れカード・マスターキーの長期貸出・状態の食い違い・KPI |
+| `test/audit-chain.test.js` | 監査ログの改ざん・削除・挿入・並べ替え・末尾切りの検出 |
 | `test/contrast.test.js` | ライト/ダーク/既定の配色のコントラスト比、操作要素の寸法 |
 | `test/display.test.js` | ラベル変換、相対時間の境界、日時入力の往復と不正値の拒否 |
 | `test/format.test.js` | ソースの行長・行数・不可視文字の混入 |
 | `test/html.test.js` | CSPの指令、インライン属性の不在、スクリプトの出所、aria、主要なid |
 | `test/readme.test.js` | READMEの表・ディレクトリー構造・画像参照・表記 |
+| `test/sha256.test.js` | SHA-256の実装（NISTのテストベクター、node:cryptoとの突き合わせ） |
 | `test/validate.test.js` | 不正なインポートデータの拒否（UUID形式・一意性・型） |
 
 ---

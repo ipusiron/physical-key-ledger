@@ -139,12 +139,21 @@ function collect(store, out) {
 // Appends one audit entry inside an existing transaction. The seal callback
 // receives the previous entry (or null) and returns the entry to store, which
 // is how the hash chain is built without a second transaction.
-export function appendAuditInTx(auditStore, draft, seal) {
+//
+// The head of the chain (last seq and hash) is written to the meta store in
+// the same transaction. Without it, cutting the newest entries off the log
+// would leave a chain that still verifies.
+export function appendAuditInTx(auditStore, metaStore, draft, seal) {
   auditStore.openCursor(null, "prev").onsuccess = (e) => {
     const c = e.target.result;
     const prev = c ? c.value : null;
     const entry = seal ? seal(draft, prev) : draft;
-    auditStore.add(entry);
+    const req = auditStore.add(entry);
+    if (metaStore && entry.hash) {
+      req.onsuccess = (ev) => {
+        metaStore.put({ key: CHAIN_HEAD_KEY, value: { seq: ev.target.result, hash: entry.hash } });
+      };
+    }
   };
 }
 
@@ -188,14 +197,14 @@ export const dbApi = {
   // lands or none of it does.
 
   async putKeyWithAudit(db, keyObj, auditDraft, seal) {
-    const { t, keys, audit } = tx(db, "readwrite", "keys", "audit");
+    const { t, keys, audit, meta } = tx(db, "readwrite", "keys", "audit", "meta");
     keys.put(keyObj);
-    appendAuditInTx(audit, auditDraft, seal);
+    appendAuditInTx(audit, meta, auditDraft, seal);
     return done(t, true);
   },
 
   async deleteKeyWithAudit(db, uuid, auditDraft, seal) {
-    const { t, keys, loans, audit } = tx(db, "readwrite", "keys", "loans", "audit");
+    const { t, keys, loans, audit, meta } = tx(db, "readwrite", "keys", "loans", "audit", "meta");
     let blocked = false;
     loans.index("by_keyUuid").openCursor(IDBKeyRange.only(uuid)).onsuccess = (e) => {
       const c = e.target.result;
@@ -205,7 +214,7 @@ export const dbApi = {
         return;
       }
       keys.delete(uuid);
-      appendAuditInTx(audit, auditDraft, seal);
+      appendAuditInTx(audit, meta, auditDraft, seal);
     };
     try {
       return await done(t, true);
@@ -216,24 +225,24 @@ export const dbApi = {
   },
 
   async createLoanAtomic(db, { keyObj, loan, auditDraft }, seal) {
-    const { t, keys, loans, audit } = tx(db, "readwrite", "keys", "loans", "audit");
+    const { t, keys, loans, audit, meta } = tx(db, "readwrite", "keys", "loans", "audit", "meta");
     keys.put(keyObj);
     loans.put(loan);
-    appendAuditInTx(audit, auditDraft, seal);
+    appendAuditInTx(audit, meta, auditDraft, seal);
     return done(t, true);
   },
 
   async returnLoanAtomic(db, { keyObj, loan, auditDraft }, seal) {
-    const { t, keys, loans, audit } = tx(db, "readwrite", "keys", "loans", "audit");
+    const { t, keys, loans, audit, meta } = tx(db, "readwrite", "keys", "loans", "audit", "meta");
     if (keyObj) keys.put(keyObj);
     loans.put(loan);
-    appendAuditInTx(audit, auditDraft, seal);
+    appendAuditInTx(audit, meta, auditDraft, seal);
     return done(t, true);
   },
 
   async addAudit(db, auditDraft, seal) {
-    const { t, audit } = tx(db, "readwrite", "audit");
-    appendAuditInTx(audit, auditDraft, seal);
+    const { t, audit, meta } = tx(db, "readwrite", "audit", "meta");
+    appendAuditInTx(audit, meta, auditDraft, seal);
     return done(t, true);
   },
 
@@ -301,7 +310,7 @@ export const dbApi = {
       delete copy.seq;
       audit.add(copy);
     }
-    appendAuditInTx(audit, auditDraft, seal);
+    appendAuditInTx(audit, meta, auditDraft, seal);
     return done(t, true);
   }
 };
