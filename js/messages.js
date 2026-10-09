@@ -195,7 +195,9 @@ export const MESSAGES = {
 
     "chain.empty": "監査ログがありません。",
     "chain.all_unchained": "{total}件すべてが連鎖の対象外です（このバージョンより前に記録されたログ）。",
+    "chain.all_unchained_one": "{total}件すべてが連鎖の対象外です（このバージョンより前に記録されたログ）。",
     "chain.ok": "{checked}件を検証しました{skipped}。改ざんは検出されませんでした。",
+    "chain.ok_one": "{checked}件を検証しました{skipped}。改ざんは検出されませんでした。",
     "chain.ng": "{checked}件を検証しました{skipped}。{where} で問題を検出しました: {reason}",
     "chain.skipped": "（古い形式の{n}件は対象外）",
     "chain.where": "seq {seq}",
@@ -495,7 +497,9 @@ export const MESSAGES = {
 
     "chain.empty": "The audit log is empty.",
     "chain.all_unchained": "All {total} entries are outside the chain (recorded before this version).",
+    "chain.all_unchained_one": "{total} entry is outside the chain (recorded before this version).",
     "chain.ok": "Checked {checked} entries{skipped}. No tampering was found.",
+    "chain.ok_one": "Checked {checked} entry{skipped}. No tampering was found.",
     "chain.ng": "Checked {checked} entries{skipped}. Found a problem at {where}: {reason}",
     "chain.skipped": " ({n} older entries were skipped)",
     "chain.where": "seq {seq}",
