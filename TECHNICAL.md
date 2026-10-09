@@ -578,6 +578,113 @@ await refreshCache();
 
 ---
 
+## 🔗 監査ログのハッシュチェーン
+
+### 連鎖の作り方
+
+各エントリーは、直前のエントリーのハッシュを含めて封じる。
+
+```javascript
+// js/audit-chain.js
+export function sealEntry(draft, prevEntry) {
+  const prevHash = prevEntry && HASH_RE.test(String(prevEntry.hash || ""))
+    ? prevEntry.hash
+    : GENESIS;                       // 最初は0を64桁
+  const entry = { ...draft, prevHash };
+  entry.hash = entryHash(entry, prevHash);
+  return entry;
+}
+```
+
+ハッシュの対象は `ts`・`actor`・`action`・`entityId`・`diff`・`prevHash` の6つである。
+
+**`seq` を対象に含めない理由**: 連番はIndexedDBが `add()` の完了後に割り当てる。ハッシュを計算する時点ではまだ決まっていない。順序の検証は、連番そのものと `prevHash` のつながりの両方で行う。
+
+### 同じ内容なら同じ文字列にする
+
+エクスポートとインポートを通してもハッシュが変わらないよう、キーの順序を固定したJSONを作る。
+
+```javascript
+export function stableStringify(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value ?? null);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  const keys = Object.keys(value).filter((k) => value[k] !== undefined).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(",")}}`;
+}
+```
+
+### トランザクションの中で封じる
+
+Web Cryptoの `crypto.subtle.digest` は非同期で、IndexedDBのトランザクションはPromiseを待てない（待つ間に自動で閉じる）。そのため **SHA-256を同期の自前実装（`js/sha256.js`）で持つ**。
+
+```javascript
+// js/db.js
+export function appendAuditInTx(auditStore, metaStore, draft, seal) {
+  auditStore.openCursor(null, "prev").onsuccess = (e) => {
+    const prev = e.target.result ? e.target.result.value : null;
+    const entry = seal ? seal(draft, prev) : draft;      // ここで同期的にハッシュを計算
+    const req = auditStore.add(entry);
+    if (metaStore && entry.hash) {
+      req.onsuccess = (ev) => {
+        metaStore.put({ key: CHAIN_HEAD_KEY, value: { seq: ev.target.result, hash: entry.hash } });
+      };
+    }
+  };
+}
+```
+
+### 末尾切りへの対処
+
+チェーンの末尾を削ると、残った部分は整合して見える。そこで**最後のseqとハッシュを `meta` ストアに同じトランザクションで記録**し、検証時に突き合わせる。記録側も書き換えられれば破られるが、触る場所が増えるぶん痕跡も増える。
+
+### 検証できることとできないこと
+
+| 手口 | 検出 | 理由 |
+|---|---|---|
+| 内容の書き換え | できる | 再計算したハッシュが合わない |
+| 途中の削除・挿入 | できる | 次のエントリーの `prevHash` がつながらない |
+| 並べ替え | できる | 連番の順序かつながりが壊れる |
+| 末尾の切り落とし | できる | 記録してある末尾と食い違う |
+| 台帳ごと作り直す | できない | 一貫したチェーンを作られると内部だけでは見抜けない |
+
+---
+
+## 🌐 日英対応
+
+### 構成
+
+| ファイル | 役割 |
+|---|---|
+| `js/messages.js` | 日英の辞書（画面・エラー・ヘルプ。各198キー） |
+| `js/i18n.js` | 言語の決定、`data-i18n` の差し替え、`{n}` の差し込み |
+
+### 言語の決定
+
+```javascript
+export function pickLang({ urlLang, savedLang, browserLang } = {}) {
+  if (isLang(urlLang)) return urlLang;        // ?lang=en
+  if (isLang(savedLang)) return savedLang;    // localStorage
+  const b = String(browserLang || "").toLowerCase();
+  if (b.startsWith("ja")) return "ja";
+  if (b) return "en";                          // 日本語以外は英語
+  return DEFAULT_LANG;
+}
+```
+
+### 差し替えの3形
+
+- `data-i18n="key"` → `textContent`
+- `data-i18n-html="key"` → `innerHTML`（辞書の中の文字列だけ。利用者の入力は通さない）
+- `data-i18n-attr="placeholder:key,title:key2"` → 属性
+
+HTMLには日本語を既定値として残す。JavaScriptが動かないときに表示されるのはこれで、動くときは必ず辞書で上書きされる。
+
+### 切り替えのときに再計算しない
+
+言語を変えても台帳の計算はやり直さない。キャッシュの値をそのまま描き直す。入力中の値・開いているモーダル・生成済みのQRコードも維持する。
+
+---
+
 ## 🧪 テスト
 
 ロジックはDOMに触らない純粋モジュールに切り出してあり、Node.jsの標準テストランナーだけで回せる。依存パッケージはない。
@@ -596,6 +703,9 @@ npm test   # node --test（Node.js 22以上）
 | `test/format.test.js` | ソースの行長・行数・不可視文字の混入 |
 | `test/html.test.js` | CSPの指令・インライン属性の不在・スクリプトの出所・aria・主要なid |
 | `test/readme.test.js` | READMEの表の数値・ディレクトリー構造・画像参照・表記 |
+| `test/audit-chain.test.js` | 改ざん・削除・挿入・並べ替え・末尾切り・旧形式の混在 |
+| `test/i18n.test.js` | 日英の辞書の整合・差し込み・タグ数・参照キーの実在 |
+| `test/sha256.test.js` | NISTのテストベクター・node:cryptoとの一致・UTF-8の変換 |
 | `test/validate.test.js` | 不正なインポートデータの拒否（UUID形式・一意性・型） |
 
 ### 方針
