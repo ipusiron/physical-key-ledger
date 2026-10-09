@@ -1,33 +1,39 @@
-// logic.js - domain logic (MVP)
+// logic.js - stateful domain layer. Pure calculations live in
+// display.js / anomaly.js / validate.js so that they can be tested with node.
 import { openDB, dbApi } from "./db.js";
+import * as anomaly from "./anomaly.js";
+import { validateDataset, validateKeyInput, validateLoanInput, isUuid } from "./validate.js";
 
 export const state = {
   db: null,
   cache: {
     keys: [],
-    loans: [],
+    loans: []
   },
   settings: {
     profileName: "local-admin",
-    multiThreshold: 4, // 同一借主の同時保持が4本以上で警告（>3）
+    multiThreshold: 4
   },
-  theme: "dark", // "light" or "dark"
+  theme: "dark" // "light" or "dark"
 };
 
 export async function initLogic() {
   state.db = await openDB();
-  // load settings
   const name = await dbApi.getSetting(state.db, "profileName");
   const mt = await dbApi.getSetting(state.db, "multiThreshold");
   if (name) state.settings.profileName = name;
-  if (mt) state.settings.multiThreshold = mt;
+  if (mt) state.settings.multiThreshold = Number(mt) || 4;
 
-  // load theme from localStorage (not IndexedDB)
-  const savedTheme = localStorage.getItem("theme");
+  // Theme lives in localStorage so that it applies before the database opens.
+  let savedTheme = null;
+  try {
+    savedTheme = localStorage.getItem("theme");
+  } catch {
+    savedTheme = null;
+  }
   if (savedTheme === "light" || savedTheme === "dark") {
     state.theme = savedTheme;
   } else {
-    // Detect system preference
     const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     state.theme = prefersDark ? "dark" : "light";
   }
@@ -38,207 +44,205 @@ export async function initLogic() {
 export async function refreshCache() {
   const [keys, loans] = await Promise.all([
     dbApi.getAllKeys(state.db),
-    dbApi.getAllLoans(state.db),
+    dbApi.getAllLoans(state.db)
   ]);
   state.cache.keys = keys;
   state.cache.loans = loans;
 }
 
 export function nowMs() { return Date.now(); }
-export function toISO(ms) {
-  if (!ms) return "";
-  try { return new Date(ms).toISOString(); } catch { return ""; }
-}
-export function fromLocalDatetime(str) {
-  // input type="datetime-local" → local time string; convert to ms
-  if (!str) return null;
-  const d = new Date(str);
-  const ms = d.getTime();
-  return Number.isNaN(ms) ? null : ms;
-}
-export function toLocalDatetimeInput(ms) {
-  if (!ms) return "";
-  const d = new Date(ms);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 export function genUuid() {
-  // simple uuid v4-ish
-  return ([1e7]+-1e3+-4e3+-8e3+-1e11)
-    .replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  // Fallback for older browsers: same shape, still from a CSPRNG.
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
-export function genLoanId() {
-  const d = new Date();
+
+export function genLoanId(date = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
-  const iso = `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-  return `L-${iso}-${Math.random().toString(36).slice(2, 6)}`;
+  const day = `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`;
+  const time = `${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+  const rnd = [...crypto.getRandomValues(new Uint8Array(2))]
+    .map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `L-${day}-${time}-${rnd}`;
+}
+
+function auditDraft(action, entityId, diff) {
+  return {
+    ts: nowMs(),
+    actor: state.settings.profileName,
+    action,
+    entityId,
+    diff
+  };
+}
+
+function fail(errors) {
+  throw new Error(errors.join("\n"));
 }
 
 // CRUD & flows
 export async function upsertKey(keyObj, isNew) {
-  keyObj.updatedAt = nowMs();
-  if (isNew) keyObj.createdAt = keyObj.updatedAt;
-  await dbApi.putKey(state.db, keyObj);
-  await dbApi.addAudit(state.db, {
-    ts: nowMs(),
-    actor: state.settings.profileName,
-    action: isNew ? "key.create" : "key.update",
-    entityId: keyObj.uuid,
-    diff: keyObj, // MVP: snapshot-ish
-  });
+  const check = validateKeyInput(keyObj, state.cache.keys, isNew);
+  if (!check.ok) fail(check.errors);
+
+  const record = { ...keyObj };
+  record.updatedAt = nowMs();
+  if (isNew) {
+    record.createdAt = record.updatedAt;
+  } else {
+    const prev = state.cache.keys.find((k) => k.uuid === record.uuid);
+    record.createdAt = prev?.createdAt ?? record.updatedAt;
+  }
+
+  await dbApi.putKeyWithAudit(
+    state.db,
+    record,
+    auditDraft(isNew ? "key.create" : "key.update", record.uuid, record),
+    sealAudit
+  );
   await refreshCache();
 }
 
 export async function deleteKey(uuid) {
-  // prevent delete if active loan exists
-  const active = (await dbApi.getActiveLoanByKey(state.db, uuid));
-  if (active) throw new Error("貸出中のため削除できません。先に回収してください。");
-
-  await dbApi.deleteKey(state.db, uuid);
-  await dbApi.addAudit(state.db, {
-    ts: nowMs(),
-    actor: state.settings.profileName,
-    action: "key.delete",
-    entityId: uuid,
-    diff: {},
-  });
+  if (!isUuid(uuid)) fail(["内部IDが不正です。"]);
+  await dbApi.deleteKeyWithAudit(state.db, uuid, auditDraft("key.delete", uuid, {}), sealAudit);
   await refreshCache();
 }
 
 export async function createLoan({ keyUuid, borrower, dueAt, outNotes }) {
-  // check key exists & status
-  const key = state.cache.keys.find(k => k.uuid === keyUuid);
-  if (!key) throw new Error("鍵が存在しません。");
-  if (key.status === "loaned") throw new Error("この鍵は既に貸出中です。");
+  const key = state.cache.keys.find((k) => k.uuid === keyUuid);
+  const check = validateLoanInput({ borrower, dueAt }, key);
+  if (!check.ok) fail(check.errors);
 
   const loan = {
     loanId: genLoanId(),
     keyUuid,
-    borrower,
+    borrower: borrower.trim(),
     loanedAt: nowMs(),
     dueAt: dueAt || null,
     returnedAt: null,
     outNotes: outNotes || null,
-    inNotes: null,
+    inNotes: null
   };
+  const keyObj = { ...key, status: "loaned", updatedAt: nowMs() };
 
-  key.status = "loaned";
-  await dbApi.putKey(state.db, key);
-  await dbApi.putLoan(state.db, loan);
-  await dbApi.addAudit(state.db, {
-    ts: nowMs(),
-    actor: state.settings.profileName,
-    action: "loan.create",
-    entityId: loan.loanId,
-    diff: loan,
-  });
+  await dbApi.createLoanAtomic(
+    state.db,
+    { keyObj, loan, auditDraft: auditDraft("loan.create", loan.loanId, loan) },
+    sealAudit
+  );
   await refreshCache();
 }
 
 export async function returnLoanByKeyUuid(keyUuid, inNotes) {
-  // find active loan
   const active = await dbApi.getActiveLoanByKey(state.db, keyUuid);
-  if (!active) throw new Error("この鍵の貸出レコードが見つかりません。");
+  if (!active) fail(["この鍵の貸出レコードが見つかりません。"]);
 
-  active.returnedAt = nowMs();
-  active.inNotes = inNotes || null;
-  await dbApi.putLoan(state.db, active);
+  const loan = { ...active, returnedAt: nowMs(), inNotes: inNotes || null };
+  const prevKey = state.cache.keys.find((k) => k.uuid === keyUuid);
+  const keyObj = prevKey ? { ...prevKey, status: "stored", updatedAt: nowMs() } : null;
 
-  const key = state.cache.keys.find(k => k.uuid === keyUuid);
-  if (key) {
-    key.status = "stored";
-    await dbApi.putKey(state.db, key);
-  }
-
-  await dbApi.addAudit(state.db, {
-    ts: nowMs(),
-    actor: state.settings.profileName,
-    action: "loan.return",
-    entityId: active.loanId,
-    diff: { returnedAt: active.returnedAt, inNotes: active.inNotes },
-  });
+  await dbApi.returnLoanAtomic(
+    state.db,
+    {
+      keyObj,
+      loan,
+      auditDraft: auditDraft("loan.return", loan.loanId, {
+        returnedAt: loan.returnedAt, inNotes: loan.inNotes
+      })
+    },
+    sealAudit
+  );
   await refreshCache();
 }
 
-// Anomaly detection
-export function detectOverdue() {
-  const now = nowMs();
-  const list = [];
-  for (const L of state.cache.loans) {
-    if (L.returnedAt == null && L.dueAt && now > L.dueAt) {
-      list.push(L);
-    }
-  }
-  return list;
+// Anomaly detection and KPIs (thin wrappers over the pure module)
+export function detectOverdue(now = nowMs()) {
+  return anomaly.detectOverdue(state.cache.loans, now);
 }
 export function detectMultiHolding() {
-  const map = new Map();
-  for (const L of state.cache.loans) {
-    if (L.returnedAt == null) {
-      if (!map.has(L.borrower)) map.set(L.borrower, 0);
-      map.set(L.borrower, map.get(L.borrower) + 1);
-    }
-  }
-  const out = [];
-  for (const [borrower, count] of map.entries()) {
-    if (count >= state.settings.multiThreshold) out.push({ borrower, count });
-  }
-  return out;
+  return anomaly.detectMultiHolding(state.cache.loans, state.settings.multiThreshold);
 }
-
-// KPIs
-export function kpi() {
-  const total = state.cache.keys.length;
-  const loaned = state.cache.keys.filter(k => k.status === "loaned").length;
-  const overdue = detectOverdue().length;
-  const multi = detectMultiHolding().length;
-  return { total, loaned, overdue, multi };
+export function detectExpiredCards(now = nowMs()) {
+  return anomaly.detectExpiredCards(state.cache.keys, state.cache.loans, now);
+}
+export function detectLongMasterLoan(now = nowMs()) {
+  return anomaly.detectLongMasterLoan(state.cache.keys, state.cache.loans, now);
+}
+export function detectInconsistent() {
+  return anomaly.detectInconsistent(state.cache.keys, state.cache.loans);
+}
+export function kpi(now = nowMs()) {
+  return anomaly.kpi(state.cache.keys, state.cache.loans, state.settings, now);
 }
 
 // Export / Import
+export function buildExportName(date = new Date()) {
+  const pad = (n) => String(n).padStart(2, "0");
+  const day = `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`;
+  const time = `${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+  return `pkledger-export-${day}-${time}.json`;
+}
+
 export async function exportJson() {
   const all = await dbApi.exportAll(state.db);
   const blob = new Blob([JSON.stringify(all, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  const ts = new Date();
-  const pad = (n) => String(n).padStart(2,"0");
-  const date = `${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}`;
-  const time = `${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}`;
-  const name = `pkledger-export-${date}-${time}.json`;
-  a.download = name;
+  a.download = buildExportName();
   a.click();
   URL.revokeObjectURL(a.href);
 }
 
+// Nothing is deleted until the whole dataset passes validation.
 export async function importJsonFile(file) {
   const text = await file.text();
-  const data = JSON.parse(text);
-  await dbApi.importAllReplace(state.db, data);
-  await dbApi.addAudit(state.db, {
-    ts: nowMs(),
-    actor: state.settings.profileName,
-    action: "import",
-    entityId: "all",
-    diff: { counts: {
-      keys: (data.keys||[]).length,
-      loans: (data.loans||[]).length,
-      audit: (data.audit||[]).length
-    }},
-  });
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error("JSONとして読めませんでした。ファイルを確認してください。");
+  }
+  const check = validateDataset(data);
+  if (!check.ok) {
+    throw new Error(`台帳データとして読めないため、既存のデータは変更していません。\n${check.errors.join("\n")}`);
+  }
+  await dbApi.importAllReplace(
+    state.db,
+    data,
+    auditDraft("import", "all", { counts: check.counts }),
+    sealAudit
+  );
   await refreshCache();
+  return check.counts;
 }
 
 // audit
-export async function getAuditLog(limit=500) {
+export async function getAuditLog(limit = 500) {
   return dbApi.getAllAuditDesc(state.db, limit);
+}
+export async function getAuditLogAsc(limit = 100000) {
+  return dbApi.getAllAuditAsc(state.db, limit);
+}
+
+// Hook for the audit hash chain (filled in by audit-chain.js).
+let sealAudit = null;
+export function setAuditSealer(fn) {
+  sealAudit = fn;
 }
 
 // settings
 export async function saveSettings({ profileName, multiThreshold }) {
-  state.settings.profileName = profileName || "local-admin";
-  state.settings.multiThreshold = Number(multiThreshold) || 4;
+  state.settings.profileName = (profileName || "local-admin").slice(0, 200);
+  const n = Number(multiThreshold);
+  state.settings.multiThreshold = Number.isInteger(n) && n >= 2 ? n : 4;
   await dbApi.setSetting(state.db, "profileName", state.settings.profileName);
   await dbApi.setSetting(state.db, "multiThreshold", state.settings.multiThreshold);
 }
@@ -246,7 +250,11 @@ export async function saveSettings({ profileName, multiThreshold }) {
 // theme
 export function toggleTheme() {
   state.theme = state.theme === "dark" ? "light" : "dark";
-  localStorage.setItem("theme", state.theme);
+  try {
+    localStorage.setItem("theme", state.theme);
+  } catch {
+    // Private mode or blocked storage: the theme simply does not persist.
+  }
   applyTheme();
 }
 

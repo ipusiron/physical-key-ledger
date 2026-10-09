@@ -78,7 +78,7 @@
             <span id="kpi-overdue">0</span>
           </div>
           <div class="kpi-item warn">
-            <div>多重貸出(>3)</div>
+            <div id="kpi-multi-label">多重貸出(4本以上)</div>
             <span id="kpi-multi">0</span>
           </div>
         </div>
@@ -89,7 +89,7 @@
           <ul id="list-overdue" class="bullet-list"></ul>
         </div>
         <div>
-          <h3>多重貸出（同一借主が4本以上保持）</h3>
+          <h3 id="heading-multi">多重貸出（同一借主が4本以上保持）</h3>
           <ul id="list-multi" class="bullet-list"></ul>
         </div>
       </div>
@@ -181,7 +181,7 @@
       </div>
 
       <!-- Card-specific fields (conditional) -->
-      <div id="card-fields" class="grid-2" style="display: none;">
+      <div id="card-fields" class="grid-2 hidden">
         <label>カード番号（任意）
           <input name="cardNumber" class="input" placeholder="12345678">
         </label>
