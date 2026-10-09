@@ -55,7 +55,7 @@ test("配列や空オブジェクトは台帳データとして拒否する", ()
 test("uuidがUUID形式でない鍵は拒否する（インポート経由のXSSを止める）", () => {
   const r = validateDataset(goodSet({ keys: [goodKey({ uuid: '"><img src=x onerror=alert(1)>' })] }));
   assert.equal(r.ok, false);
-  assert.ok(r.errors.some((e) => e.includes("uuid")));
+  assert.ok(r.errors.some((e) => e.vars && e.vars.field === "uuid"));
 });
 
 test("表示IDの重複は拒否する（by_id は一意インデックス）", () => {
@@ -64,7 +64,7 @@ test("表示IDの重複は拒否する（by_id は一意インデックス）", 
     loans: []
   }));
   assert.equal(r.ok, false);
-  assert.ok(r.errors.some((e) => e.includes("重複")));
+  assert.ok(r.errors.some((e) => e.key.includes("duplicate")));
 });
 
 test("鍵の必須項目と値の範囲を検査する", () => {
@@ -81,14 +81,15 @@ test("鍵の必須項目と値の範囲を検査する", () => {
   for (const [over, field] of cases) {
     const r = validateDataset(goodSet({ keys: [goodKey(over)], loans: [] }));
     assert.equal(r.ok, false, `${field} を通してはいけない`);
-    assert.ok(r.errors.some((e) => e.includes(field)), `${field} のエラーが出ていない: ${r.errors.join(" / ")}`);
+    assert.ok(r.errors.some((e) => e.vars && e.vars.field === field),
+      `${field} のエラーが出ていない: ${JSON.stringify(r.errors)}`);
   }
 });
 
 test("貸出は実在する鍵を指していなければならない", () => {
   const r = validateDataset(goodSet({ loans: [goodLoan({ keyUuid: UUID_B })] }));
   assert.equal(r.ok, false);
-  assert.ok(r.errors.some((e) => e.includes("対応する鍵がありません")));
+  assert.ok(r.errors.some((e) => e.key === "err.dataset_key_missing"));
 });
 
 test("貸出IDの重複と日時の型を検査する", () => {
@@ -108,6 +109,14 @@ test("監査ログの形も検査する", () => {
   assert.equal(validateDataset(goodSet({ audit: "all" })).ok, false);
 });
 
+test("エラーはすべて辞書のキーで返る", () => {
+  const r = validateDataset({ keys: [goodKey({ uuid: "bad" })], loans: [], audit: [] });
+  assert.equal(r.ok, false);
+  for (const e of r.errors) {
+    assert.ok(typeof e.key === "string" && e.key.startsWith("err."), JSON.stringify(e));
+  }
+});
+
 test("エラーの件数は上限で打ち切る", () => {
   const keys = Array.from({ length: 30 }, () => goodKey({ uuid: "bad", id: "", name: "" }));
   const r = validateDataset({ keys, loans: [], audit: [] });
@@ -123,7 +132,7 @@ test("鍵フォームの入力検査", () => {
   assert.equal(validateKeyInput(goodKey({ uuid: "nope" }), existing, true).ok, false);
   const span = validateKeyInput(goodKey({ validFrom: NOW + 1000, validUntil: NOW }), existing, true);
   assert.equal(span.ok, false);
-  assert.ok(span.errors.some((e) => e.includes("有効期限")));
+  assert.ok(span.errors.some((e) => e.key === "err.valid_range"));
   // 既存の鍵を編集するときは自分の表示IDと衝突しない
   assert.equal(validateKeyInput(goodKey({ uuid: UUID_B, id: "KEY-002" }), existing, false).ok, true);
 });
@@ -134,9 +143,9 @@ test("貸出フォームの入力検査（廃止した鍵は貸し出せない�
   assert.equal(validateLoanInput({ borrower: "", dueAt: null }, stored).ok, false);
   const retired = validateLoanInput({ borrower: "emp-1", dueAt: null }, goodKey({ status: "retired" }));
   assert.equal(retired.ok, false);
-  assert.ok(retired.errors.some((e) => e.includes("廃止")));
+  assert.ok(retired.errors.some((e) => e.key === "err.not_stored"));
   const loaned = validateLoanInput({ borrower: "emp-1", dueAt: null }, goodKey({ status: "loaned" }));
   assert.equal(loaned.ok, false);
-  assert.ok(loaned.errors.some((e) => e.includes("すでに貸出中")));
+  assert.ok(loaned.errors.some((e) => e.key === "err.already_loaned"));
   assert.equal(validateLoanInput({ borrower: "emp-1", dueAt: null }, null).ok, false);
 });

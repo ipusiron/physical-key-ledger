@@ -2,14 +2,20 @@
 // Import replaces the whole ledger, so nothing is written until the dataset
 // passes every check here.
 
-import { CATEGORIES, STATUSES, TYPE_OPTIONS } from "./display.js";
+import { CATEGORIES, STATUSES, ALL_TYPES } from "./display.js";
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const MAX_TEXT = 200;
 export const MAX_NOTES = 1000;
 export const MAX_ERRORS = 12;
 
-const KNOWN_TYPES = new Set(Object.values(TYPE_OPTIONS).flat().map((o) => o.value));
+const KNOWN_TYPES = new Set(ALL_TYPES);
+
+// Validation results are reported as { key, vars } so that the screen can
+// show them in either language.
+const fieldErr = (at, field) => ({ key: "err.dataset_field_invalid", vars: { at, field } });
+const emptyErr = (at, field) => ({ key: "err.dataset_field_empty", vars: { at, field } });
+const dupErr = (at, field) => ({ key: "err.dataset_duplicate", vars: { at, field } });
 
 export function isUuid(v) {
   return typeof v === "string" && UUID_RE.test(v);
@@ -44,13 +50,13 @@ export function validateDataset(data) {
   if (!isPlainObject(data)) {
     return {
       ok: false,
-      errors: ["台帳データの形式ではありません（keys・loans・auditを持つオブジェクトが必要です）。"],
+      errors: [{ key: "err.dataset_not_object" }],
       counts: { keys: 0, loans: 0, audit: 0 }
     };
   }
-  if (!Array.isArray(data.keys)) push("keys が配列ではありません。");
-  if (!Array.isArray(data.loans)) push("loans が配列ではありません。");
-  if (data.audit != null && !Array.isArray(data.audit)) push("audit が配列ではありません。");
+  if (!Array.isArray(data.keys)) push({ key: "err.dataset_not_array", vars: { name: "keys" } });
+  if (!Array.isArray(data.loans)) push({ key: "err.dataset_not_array", vars: { name: "loans" } });
+  if (data.audit != null && !Array.isArray(data.audit)) push({ key: "err.dataset_not_array", vars: { name: "audit" } });
   if (errors.length) {
     return { ok: false, errors, counts: { keys: 0, loans: 0, audit: 0 } };
   }
@@ -63,54 +69,54 @@ export function validateDataset(data) {
   const displayIds = new Set();
   keys.forEach((k, i) => {
     const at = `keys[${i}]`;
-    if (!isPlainObject(k)) { push(`${at} がオブジェクトではありません。`); return; }
-    if (!isUuid(k.uuid)) push(`${at}.uuid がUUID形式ではありません。`);
-    else if (uuids.has(k.uuid)) push(`${at}.uuid が重複しています。`);
+    if (!isPlainObject(k)) { push({ key: "err.dataset_item_not_object", vars: { at } }); return; }
+    if (!isUuid(k.uuid)) push(fieldErr(at, "uuid"));
+    else if (uuids.has(k.uuid)) push(dupErr(at, "uuid"));
     else uuids.add(k.uuid);
-    if (!isFilledText(k.id)) push(`${at}.id が空か、長すぎます。`);
-    else if (displayIds.has(k.id)) push(`${at}.id「${k.id}」が重複しています（表示IDは一意である必要があります）。`);
+    if (!isFilledText(k.id)) push(emptyErr(at, "id"));
+    else if (displayIds.has(k.id)) push({ key: "err.dataset_id_duplicate", vars: { at, id: k.id } });
     else displayIds.add(k.id);
-    if (!isFilledText(k.name)) push(`${at}.name が空か、長すぎます。`);
-    if (k.category != null && !CATEGORIES.includes(k.category)) push(`${at}.category が不正です。`);
-    if (!STATUSES.includes(k.status)) push(`${at}.status が不正です。`);
-    if (k.type != null && !KNOWN_TYPES.has(k.type)) push(`${at}.type が不正です。`);
-    if (k.location != null && !isText(k.location)) push(`${at}.location が不正です。`);
-    if (k.notes != null && !isText(k.notes, MAX_NOTES)) push(`${at}.notes が不正です。`);
-    if (k.cardNumber != null && !isText(k.cardNumber)) push(`${at}.cardNumber が不正です。`);
-    if (k.accessLevel != null && !isText(k.accessLevel)) push(`${at}.accessLevel が不正です。`);
-    if (!isEpochOrNull(k.validFrom)) push(`${at}.validFrom が不正です。`);
-    if (!isEpochOrNull(k.validUntil)) push(`${at}.validUntil が不正です。`);
-    if (!isEpochOrNull(k.createdAt)) push(`${at}.createdAt が不正です。`);
-    if (!isEpochOrNull(k.updatedAt)) push(`${at}.updatedAt が不正です。`);
+    if (!isFilledText(k.name)) push(emptyErr(at, "name"));
+    if (k.category != null && !CATEGORIES.includes(k.category)) push(fieldErr(at, "category"));
+    if (!STATUSES.includes(k.status)) push(fieldErr(at, "status"));
+    if (k.type != null && !KNOWN_TYPES.has(k.type)) push(fieldErr(at, "type"));
+    if (k.location != null && !isText(k.location)) push(fieldErr(at, "location"));
+    if (k.notes != null && !isText(k.notes, MAX_NOTES)) push(fieldErr(at, "notes"));
+    if (k.cardNumber != null && !isText(k.cardNumber)) push(fieldErr(at, "cardNumber"));
+    if (k.accessLevel != null && !isText(k.accessLevel)) push(fieldErr(at, "accessLevel"));
+    if (!isEpochOrNull(k.validFrom)) push(fieldErr(at, "validFrom"));
+    if (!isEpochOrNull(k.validUntil)) push(fieldErr(at, "validUntil"));
+    if (!isEpochOrNull(k.createdAt)) push(fieldErr(at, "createdAt"));
+    if (!isEpochOrNull(k.updatedAt)) push(fieldErr(at, "updatedAt"));
   });
 
   const loanIds = new Set();
   loans.forEach((L, i) => {
     const at = `loans[${i}]`;
     if (!isPlainObject(L)) { push(`${at} がオブジェクトではありません。`); return; }
-    if (!isFilledText(L.loanId)) push(`${at}.loanId が空か、長すぎます。`);
-    else if (loanIds.has(L.loanId)) push(`${at}.loanId が重複しています。`);
+    if (!isFilledText(L.loanId)) push(emptyErr(at, "loanId"));
+    else if (loanIds.has(L.loanId)) push(dupErr(at, "loanId"));
     else loanIds.add(L.loanId);
-    if (!isUuid(L.keyUuid)) push(`${at}.keyUuid がUUID形式ではありません。`);
-    else if (!uuids.has(L.keyUuid)) push(`${at}.keyUuid に対応する鍵がありません。`);
-    if (!isFilledText(L.borrower)) push(`${at}.borrower が空か、長すぎます。`);
-    if (!isEpoch(L.loanedAt)) push(`${at}.loanedAt が不正です。`);
-    if (!isEpochOrNull(L.dueAt)) push(`${at}.dueAt が不正です。`);
-    if (!isEpochOrNull(L.returnedAt)) push(`${at}.returnedAt が不正です。`);
-    if (L.outNotes != null && !isText(L.outNotes, MAX_NOTES)) push(`${at}.outNotes が不正です。`);
-    if (L.inNotes != null && !isText(L.inNotes, MAX_NOTES)) push(`${at}.inNotes が不正です。`);
+    if (!isUuid(L.keyUuid)) push(fieldErr(at, "keyUuid"));
+    else if (!uuids.has(L.keyUuid)) push({ key: "err.dataset_key_missing", vars: { at } });
+    if (!isFilledText(L.borrower)) push(emptyErr(at, "borrower"));
+    if (!isEpoch(L.loanedAt)) push(fieldErr(at, "loanedAt"));
+    if (!isEpochOrNull(L.dueAt)) push(fieldErr(at, "dueAt"));
+    if (!isEpochOrNull(L.returnedAt)) push(fieldErr(at, "returnedAt"));
+    if (L.outNotes != null && !isText(L.outNotes, MAX_NOTES)) push(fieldErr(at, "outNotes"));
+    if (L.inNotes != null && !isText(L.inNotes, MAX_NOTES)) push(fieldErr(at, "inNotes"));
   });
 
   audit.forEach((a, i) => {
     const at = `audit[${i}]`;
     if (!isPlainObject(a)) { push(`${at} がオブジェクトではありません。`); return; }
-    if (!isEpoch(a.ts)) push(`${at}.ts が不正です。`);
-    if (!isFilledText(a.action)) push(`${at}.action が不正です。`);
-    if (a.actor != null && !isText(a.actor)) push(`${at}.actor が不正です。`);
-    if (a.entityId != null && !isText(a.entityId, MAX_NOTES)) push(`${at}.entityId が不正です。`);
-    if (a.seq != null && !(Number.isInteger(a.seq) && a.seq >= 1)) push(`${at}.seq が不正です。`);
-    if (a.hash != null && !/^[0-9a-f]{64}$/.test(String(a.hash))) push(`${at}.hash が不正です。`);
-    if (a.prevHash != null && !/^[0-9a-f]{64}$/.test(String(a.prevHash))) push(`${at}.prevHash が不正です。`);
+    if (!isEpoch(a.ts)) push(fieldErr(at, "ts"));
+    if (!isFilledText(a.action)) push(fieldErr(at, "action"));
+    if (a.actor != null && !isText(a.actor)) push(fieldErr(at, "actor"));
+    if (a.entityId != null && !isText(a.entityId, MAX_NOTES)) push(fieldErr(at, "entityId"));
+    if (a.seq != null && !(Number.isInteger(a.seq) && a.seq >= 1)) push(fieldErr(at, "seq"));
+    if (a.hash != null && !/^[0-9a-f]{64}$/.test(String(a.hash))) push(fieldErr(at, "hash"));
+    if (a.prevHash != null && !/^[0-9a-f]{64}$/.test(String(a.prevHash))) push(fieldErr(at, "prevHash"));
   });
 
   return {
@@ -123,27 +129,27 @@ export function validateDataset(data) {
 // Validates what the key form produces before it reaches the database.
 export function validateKeyInput(obj, existingKeys = [], isNew = true) {
   const errors = [];
-  if (!isUuid(obj.uuid)) errors.push("内部IDが不正です。");
-  if (!isFilledText(obj.id)) errors.push("表示IDを入力してください（200文字以内）。");
-  if (!isFilledText(obj.name)) errors.push("名称を入力してください（200文字以内）。");
-  if (!CATEGORIES.includes(obj.category)) errors.push("カテゴリーが不正です。");
-  if (!STATUSES.includes(obj.status)) errors.push("状態が不正です。");
-  if (obj.type && !KNOWN_TYPES.has(obj.type)) errors.push("種別が不正です。");
+  if (!isUuid(obj.uuid)) errors.push({ key: "err.uuid_invalid" });
+  if (!isFilledText(obj.id)) errors.push({ key: "err.id_required" });
+  if (!isFilledText(obj.name)) errors.push({ key: "err.name_required" });
+  if (!CATEGORIES.includes(obj.category)) errors.push({ key: "err.category_invalid" });
+  if (!STATUSES.includes(obj.status)) errors.push({ key: "err.status_invalid" });
+  if (obj.type && !KNOWN_TYPES.has(obj.type)) errors.push({ key: "err.type_invalid" });
   if (obj.validFrom != null && obj.validUntil != null && obj.validFrom > obj.validUntil) {
-    errors.push("有効期限の開始が終了より後になっています。");
+    errors.push({ key: "err.valid_range" });
   }
   const clash = existingKeys.find((k) => k.id === obj.id && k.uuid !== obj.uuid);
-  if (clash) errors.push(`表示ID「${obj.id}」はすでに使われています。`);
-  if (isNew && existingKeys.some((k) => k.uuid === obj.uuid)) errors.push("内部IDが重複しています。");
+  if (clash) errors.push({ key: "err.id_taken", vars: { id: obj.id } });
+  if (isNew && existingKeys.some((k) => k.uuid === obj.uuid)) errors.push({ key: "err.uuid_duplicate" });
   return { ok: errors.length === 0, errors };
 }
 
 export function validateLoanInput({ borrower, dueAt }, key) {
   const errors = [];
-  if (!key) errors.push("鍵が存在しません。");
-  else if (key.status === "loaned") errors.push("この鍵はすでに貸出中です。");
-  else if (key.status !== "stored") errors.push("保管中の鍵だけを貸し出せます（廃止した鍵は貸し出せません）。");
-  if (!isFilledText(borrower)) errors.push("借主識別子を入力してください（200文字以内）。");
-  if (!isEpochOrNull(dueAt)) errors.push("返却期限が不正です。");
+  if (!key) errors.push({ key: "err.key_missing" });
+  else if (key.status === "loaned") errors.push({ key: "err.already_loaned" });
+  else if (key.status !== "stored") errors.push({ key: "err.not_stored" });
+  if (!isFilledText(borrower)) errors.push({ key: "err.borrower_required" });
+  if (!isEpochOrNull(dueAt)) errors.push({ key: "err.due_invalid" });
   return { ok: errors.length === 0, errors };
 }

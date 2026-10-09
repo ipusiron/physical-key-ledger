@@ -72,7 +72,7 @@ export async function openDB() {
 
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
-    req.onblocked = () => reject(new Error("ほかのタブが古いバージョンで開いています。ほかのタブを閉じてから再読み込みしてください。"));
+    req.onblocked = () => reject(Object.assign(new Error("db-blocked"), { i18nKey: "err.db_blocked" }));
   });
 }
 
@@ -219,7 +219,7 @@ export const dbApi = {
     try {
       return await done(t, true);
     } catch (err) {
-      if (blocked) throw new Error("貸出中のため削除できません。先に回収してください。");
+      if (blocked) throw Object.assign(new Error("delete-blocked"), { i18nKey: "err.delete_blocked" });
       throw err;
     }
   },

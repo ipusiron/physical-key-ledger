@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   GENESIS, HASH_RE, stableStringify, canonicalForm, entryHash, sealEntry,
-  chainHeadOf, verifyChain, describeResult, REASON_LABELS
+  chainHeadOf, verifyChain, BREAK_REASONS
 } from "../js/audit-chain.js";
 
 const TS = 1_700_000_000_000;
@@ -148,20 +148,19 @@ test("連鎖が始まったあとのハッシュなしは異常として扱う",
   assert.ok(r.breaks.some((b) => b.reason === "missing-hash"));
 });
 
-test("結果の説明文が状況に応じて変わる", () => {
-  assert.match(describeResult(verifyChain([])), /監査ログがありません/);
-  assert.match(describeResult(verifyChain(buildChain(2))), /2件を検証しました。改ざんは検出されませんでした/);
-  const broken = buildChain(3);
-  broken[0] = { ...broken[0], action: "loan.create" };
-  assert.match(describeResult(verifyChain(broken)), /seq 1 で問題を検出/);
-  for (const key of Object.keys(REASON_LABELS)) {
-    assert.ok(REASON_LABELS[key].length > 0);
-  }
-});
-
 test("同じ内容でも前のハッシュが違えば別のハッシュになる", () => {
   const a = sealEntry(draft(1), null);
   const b = sealEntry(draft(1), { hash: "f".repeat(64) });
   assert.notEqual(a.hash, b.hash);
   assert.equal(canonicalForm(draft(1), GENESIS).includes(GENESIS), true);
+});
+
+test("検出の理由はすべて既知のコードで返る", () => {
+  const chain = buildChain(3);
+  chain[1] = { ...chain[1], actor: "x" };
+  const r = verifyChain(chain, { seq: 99, hash: "a".repeat(64) });
+  assert.ok(r.breaks.length >= 2);
+  for (const b of r.breaks) {
+    assert.ok(BREAK_REASONS.includes(b.reason), `未知の理由: ${b.reason}`);
+  }
 });

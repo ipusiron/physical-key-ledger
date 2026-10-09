@@ -127,24 +127,8 @@ export function verifyChain(entries, head = null) {
   return result;
 }
 
-export const REASON_LABELS = {
-  "hash-mismatch": "内容が書き換えられている（再計算したハッシュが合わない）",
-  "prev-mismatch": "前のエントリーとのつながりが切れている（削除か挿入）",
-  "missing-hash": "ハッシュのないエントリーが途中に混ざっている",
-  "seq-out-of-order": "連番の順序が壊れている",
-  "head-mismatch": "最後のエントリーが削られている（記録してある末尾と一致しない）"
-};
-
-// One line for the screen and the report.
-export function describeResult(r) {
-  if (r.total === 0) return "監査ログがありません。";
-  if (r.checked === 0) {
-    return `${r.total}件すべてが連鎖の対象外です（このバージョンより前に記録されたログ）。`;
-  }
-  const base = `${r.checked}件を検証しました`;
-  const skipped = r.unchained > 0 ? `（古い形式の${r.unchained}件は対象外）` : "";
-  if (r.ok) return `${base}${skipped}。改ざんは検出されませんでした。`;
-  const first = r.breaks[0];
-  const where = first.seq == null ? "位置不明" : `seq ${first.seq}`;
-  return `${base}${skipped}。${where} で問題を検出しました: ${REASON_LABELS[first.reason] || first.reason}`;
-}
+// Reason codes used by verifyChain. The text for each one lives in
+// messages.js so that it can be shown in either language.
+export const BREAK_REASONS = [
+  "hash-mismatch", "prev-mismatch", "missing-hash", "seq-out-of-order", "head-mismatch"
+];

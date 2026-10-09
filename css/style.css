@@ -211,6 +211,9 @@ a { color: var(--accent); }
    line and pushes the table below the fold. */
 #keys .card-header .row .input { width: auto; flex: 1 1 200px; }
 #keys .card-header .row .btn { flex: 0 0 auto; }
+/* Keep the two buttons of the actions column on one line: in English
+   they are wider and used to stack on top of each other. */
+.table td.row { flex-wrap: nowrap; }
 
 .kpi { display: flex; gap: 16px; flex-wrap: wrap; }
 .kpi-item {

@@ -22,7 +22,7 @@
 </head>
 <body>
   <noscript>
-    <p class="noscript-banner">
+    <p class="noscript-banner" data-i18n="app.noscript">
       このツールはJavaScriptで台帳を読み書きします。JavaScriptを有効にしてから開いてください。
       データはブラウザー内（IndexedDB）にのみ保存され、外部へは送信しません。
     </p>
@@ -31,56 +31,69 @@
     <div class="header-left"></div>
     <div class="header-center">
       <h1>Physical Key Ledger</h1>
-      <p class="header-tagline">物理鍵・ICカード・カードキーの貸出・返却を可視化し、紛失リスクを低減する管理台帳</p>
+      <p class="header-tagline" data-i18n="app.tagline">物理鍵・ICカード・カードキーの貸出・返却を可視化し、紛失リスクを低減する管理台帳</p>
     </div>
     <div class="header-actions">
-      <button id="btn-help" class="btn btn-tertiary" aria-label="ヘルプ" title="ヘルプ">❓</button>
-      <button id="btn-theme" class="btn btn-tertiary" aria-label="テーマ切替" title="テーマ切替">
+      <button id="btn-lang" class="btn btn-tertiary"
+              data-i18n="header.lang" data-i18n-attr="aria-label:header.lang_aria,title:header.lang_aria"
+              aria-label="表示言語を切り替える" title="表示言語を切り替える">English</button>
+      <button id="btn-help" class="btn btn-tertiary"
+              data-i18n-attr="aria-label:header.help,title:header.help"
+              aria-label="ヘルプ" title="ヘルプ">❓</button>
+      <button id="btn-theme" class="btn btn-tertiary"
+              data-i18n-attr="aria-label:header.theme,title:header.theme"
+              aria-label="テーマ切替" title="テーマ切替">
         <span class="theme-icon">🌙</span>
       </button>
-      <button id="btn-export" class="btn">エクスポート(JSON)</button>
-      <label class="import-label btn">
-        インポート(JSON 全置換)
+      <button id="btn-export" class="btn" data-i18n="header.export"
+              data-i18n-attr="title:header.export_title" title="台帳をJSONで書き出す">エクスポート(JSON)</button>
+      <label class="import-label btn" data-i18n-attr="title:header.import_title"
+             title="JSONを読み込んで台帳を全置換する">
+        <span data-i18n="header.import">インポート(JSON 全置換)</span>
         <input id="file-import" type="file" accept="application/json" hidden />
       </label>
-      <button id="btn-audit" class="btn btn-secondary">監査ログ</button>
-      <button id="btn-settings" class="btn btn-tertiary">設定</button>
-      <button id="btn-menu" class="btn btn-tertiary mobile-menu-btn" aria-label="メニュー"
+      <button id="btn-audit" class="btn btn-secondary" data-i18n="header.audit">監査ログ</button>
+      <button id="btn-settings" class="btn btn-tertiary" data-i18n="header.settings">設定</button>
+      <button id="btn-menu" class="btn btn-tertiary mobile-menu-btn"
+              data-i18n-attr="aria-label:header.menu" aria-label="メニュー"
               aria-expanded="false" aria-controls="mobile-menu">☰</button>
     </div>
   </header>
 
   <!-- Mobile menu dropdown -->
   <div id="mobile-menu" class="mobile-menu hidden">
-    <button id="btn-help-mobile" class="btn btn-tertiary">❓ ヘルプ</button>
-    <button id="btn-theme-mobile" class="btn btn-tertiary">
-      <span class="theme-icon">🌙</span> テーマ切替
+    <button id="btn-lang-mobile" class="btn btn-tertiary" data-i18n="header.lang">English</button>
+    <button id="btn-help-mobile" class="btn btn-tertiary">
+      <span aria-hidden="true">❓</span> <span data-i18n="header.help">ヘルプ</span>
     </button>
-    <button id="btn-export-mobile" class="btn">エクスポート(JSON)</button>
+    <button id="btn-theme-mobile" class="btn btn-tertiary">
+      <span class="theme-icon">🌙</span> <span data-i18n="header.theme_mobile">テーマ切替</span>
+    </button>
+    <button id="btn-export-mobile" class="btn" data-i18n="header.export">エクスポート(JSON)</button>
     <label class="import-label btn">
-      インポート(JSON 全置換)
+      <span data-i18n="header.import">インポート(JSON 全置換)</span>
       <input id="file-import-mobile" type="file" accept="application/json" hidden />
     </label>
-    <button id="btn-audit-mobile" class="btn btn-secondary">監査ログ</button>
-    <button id="btn-settings-mobile" class="btn btn-tertiary">設定</button>
+    <button id="btn-audit-mobile" class="btn btn-secondary" data-i18n="header.audit">監査ログ</button>
+    <button id="btn-settings-mobile" class="btn btn-tertiary" data-i18n="header.settings">設定</button>
   </div>
 
   <main class="container">
     <!-- DASHBOARD -->
     <section class="card" id="dashboard">
       <div class="card-header">
-        <h2>ダッシュボード</h2>
+        <h2 data-i18n="dash.title">ダッシュボード</h2>
         <div class="kpi" aria-live="polite">
           <div class="kpi-item">
-            <div>総鍵数</div>
+            <div data-i18n="dash.total">総鍵数</div>
             <span id="kpi-total">0</span>
           </div>
           <div class="kpi-item">
-            <div>貸出中</div>
+            <div data-i18n="dash.loaned">貸出中</div>
             <span id="kpi-loaned">0</span>
           </div>
           <div class="kpi-item warn">
-            <div>期限超過</div>
+            <div data-i18n="dash.overdue">期限超過</div>
             <span id="kpi-overdue">0</span>
           </div>
           <div class="kpi-item warn">
@@ -88,14 +101,14 @@
             <span id="kpi-multi">0</span>
           </div>
           <div class="kpi-item warn">
-            <div id="kpi-expiring-label">期限切れ・間近のカード</div>
+            <div id="kpi-expiring-label" data-i18n="dash.expiring">期限切れ・間近のカード</div>
             <span id="kpi-expiring">0</span>
           </div>
         </div>
       </div>
       <div class="card-body grid-2">
         <div>
-          <h3>期限超過（返却期限を過ぎて未返却）</h3>
+          <h3 data-i18n="dash.overdue_heading">期限超過（返却期限を過ぎて未返却）</h3>
           <ul id="list-overdue" class="bullet-list" aria-live="polite"></ul>
         </div>
         <div>
@@ -107,7 +120,7 @@
           <ul id="list-expiring" class="bullet-list" aria-live="polite"></ul>
         </div>
         <div>
-          <h3>そのほかの注意</h3>
+          <h3 data-i18n="dash.notice_heading">そのほかの注意</h3>
           <ul id="list-notice" class="bullet-list" aria-live="polite"></ul>
         </div>
       </div>
@@ -116,39 +129,43 @@
     <!-- KEYS TABLE -->
     <section class="card" id="keys">
       <div class="card-header">
-        <h2>鍵一覧</h2>
+        <h2 data-i18n="keys.title">鍵一覧</h2>
         <div class="row">
           <input id="search" type="search" class="input" placeholder="検索（ID/名称/場所/借主）"
+                 data-i18n-attr="placeholder:keys.search_placeholder,aria-label:keys.search_aria"
                  aria-label="鍵の検索（ID・名称・保管場所・借主）">
-          <select id="filter-category" class="input" aria-label="カテゴリーで絞り込む">
-            <option value="">すべてのカテゴリー</option>
-            <option value="physical-key">🔑 物理鍵</option>
-            <option value="ic-card">💳 ICカード</option>
-            <option value="card-key">🎫 カードキー</option>
+          <select id="filter-category" class="input"
+                  data-i18n-attr="aria-label:keys.filter_category_aria" aria-label="カテゴリーで絞り込む">
+            <option value="" data-i18n="keys.filter_category_all">すべてのカテゴリー</option>
+            <option value="physical-key" data-i18n="cat.physical-key">🔑 物理鍵</option>
+            <option value="ic-card" data-i18n="cat.ic-card">💳 ICカード</option>
+            <option value="card-key" data-i18n="cat.card-key">🎫 カードキー</option>
           </select>
-          <select id="filter-status" class="input" aria-label="状態で絞り込む">
-            <option value="">すべての状態</option>
-            <option value="stored">保管中</option>
-            <option value="loaned">貸出中</option>
-            <option value="retired">廃止</option>
+          <select id="filter-status" class="input"
+                  data-i18n-attr="aria-label:keys.filter_status_aria" aria-label="状態で絞り込む">
+            <option value="" data-i18n="keys.filter_status_all">すべての状態</option>
+            <option value="stored" data-i18n="status.stored">保管中</option>
+            <option value="loaned" data-i18n="status.loaned">貸出中</option>
+            <option value="retired" data-i18n="status.retired">廃止</option>
           </select>
-          <button id="btn-new-key" class="btn primary">新規登録</button>
+          <button id="btn-new-key" class="btn primary" data-i18n="keys.new">新規登録</button>
         </div>
       </div>
       <div class="card-body">
         <div class="table-wrapper">
-          <table class="table" id="tbl-keys" aria-label="鍵一覧">
+          <table class="table" id="tbl-keys"
+                 data-i18n-attr="aria-label:keys.table_aria" aria-label="鍵一覧">
             <thead>
               <tr>
-                <th>ID</th>
-                <th>カテゴリー</th>
-                <th>名称</th>
-                <th>種別</th>
-                <th>状態</th>
-                <th>保管場所</th>
-                <th>貸出先</th>
-                <th>返却期限</th>
-                <th>操作</th>
+                <th data-i18n="keys.col_id">ID</th>
+                <th data-i18n="keys.col_category">カテゴリー</th>
+                <th data-i18n="keys.col_name">名称</th>
+                <th data-i18n="keys.col_type">種別</th>
+                <th data-i18n="keys.col_status">状態</th>
+                <th data-i18n="keys.col_location">保管場所</th>
+                <th data-i18n="keys.col_borrower">貸出先</th>
+                <th data-i18n="keys.col_due">返却期限</th>
+                <th data-i18n="keys.col_actions">操作</th>
               </tr>
             </thead>
             <tbody id="tbody-keys">
@@ -163,88 +180,93 @@
   <!-- KEY MODAL -->
   <dialog id="dlg-key">
     <form id="form-key" method="dialog" class="modal">
-      <h3 id="dlg-key-title">鍵の登録/編集</h3>
+      <h3 id="dlg-key-title" data-i18n="key.modal_title">鍵の登録/編集</h3>
       <div class="grid-2">
         <label>
-          <span>表示ID（物理タグ/カード番号）<span class="required">*</span></span>
+          <span><span data-i18n="key.id">表示ID（物理タグ/カード番号）</span><span class="required">*</span></span>
           <input name="id" class="input" placeholder="KEY-001" required>
         </label>
         <label>
-          <span>名称<span class="required">*</span></span>
-          <input name="name" class="input" placeholder="研究室入口" required>
+          <span><span data-i18n="key.name">名称</span><span class="required">*</span></span>
+          <input name="name" class="input" placeholder="研究室入口" required
+                 data-i18n-attr="placeholder:key.name_placeholder">
         </label>
-        <label>カテゴリー
+        <label><span data-i18n="key.category">カテゴリー</span>
           <select name="category" class="input" id="key-category">
-            <option value="physical-key">🔑 物理鍵</option>
-            <option value="ic-card">💳 ICカード</option>
-            <option value="card-key">🎫 カードキー</option>
+            <option value="physical-key" data-i18n="cat.physical-key">🔑 物理鍵</option>
+            <option value="ic-card" data-i18n="cat.ic-card">💳 ICカード</option>
+            <option value="card-key" data-i18n="cat.card-key">🎫 カードキー</option>
           </select>
         </label>
-        <label>種別
+        <label><span data-i18n="key.type">種別</span>
           <select name="type" class="input" id="key-type">
             <option value="master">マスターキー</option>
             <option value="original">純正キー</option>
             <option value="spare">スペアキー</option>
           </select>
         </label>
-        <label>状態
+        <label><span data-i18n="key.status">状態</span>
           <select name="status" class="input">
-            <option value="stored">保管中</option>
-            <option value="loaned">貸出中</option>
-            <option value="retired">廃止</option>
+            <option value="stored" data-i18n="status.stored">保管中</option>
+            <option value="loaned" data-i18n="status.loaned">貸出中</option>
+            <option value="retired" data-i18n="status.retired">廃止</option>
           </select>
         </label>
-        <label>保管場所
-          <input name="location" class="input" placeholder="2F廊下キャビネット">
+        <label><span data-i18n="key.location">保管場所</span>
+          <input name="location" class="input" placeholder="2F廊下キャビネット"
+                 data-i18n-attr="placeholder:key.location_placeholder">
         </label>
       </div>
 
       <!-- Card-specific fields (conditional) -->
       <div id="card-fields" class="grid-2 hidden">
-        <label>カード番号（任意）
+        <label><span data-i18n="key.card_number">カード番号（任意）</span>
           <input name="cardNumber" class="input" placeholder="12345678">
         </label>
-        <label>アクセスレベル（任意）
+        <label><span data-i18n="key.access_level">アクセスレベル（任意）</span>
           <input name="accessLevel" class="input" placeholder="standard">
         </label>
-        <label>有効期限（開始）
+        <label><span data-i18n="key.valid_from">有効期限（開始）</span>
           <div class="input-with-icon">
             <span class="input-icon">📅</span>
-            <input name="validFrom" class="input input-datetime" type="datetime-local" placeholder="クリックして日時を選択">
+            <input name="validFrom" class="input input-datetime" type="datetime-local"
+                   placeholder="クリックして日時を選択" data-i18n-attr="placeholder:key.datetime_placeholder">
           </div>
         </label>
-        <label>有効期限（終了）
+        <label><span data-i18n="key.valid_until">有効期限（終了）</span>
           <div class="input-with-icon">
             <span class="input-icon">📅</span>
-            <input name="validUntil" class="input input-datetime" type="datetime-local" placeholder="クリックして日時を選択">
+            <input name="validUntil" class="input input-datetime" type="datetime-local"
+                   placeholder="クリックして日時を選択" data-i18n-attr="placeholder:key.datetime_placeholder">
           </div>
         </label>
       </div>
 
       <div class="grid-2">
-        <label>メモ
-          <input name="notes" class="input" placeholder="夜間は貸出不可">
+        <label><span data-i18n="key.notes">メモ</span>
+          <input name="notes" class="input" placeholder="夜間は貸出不可"
+                 data-i18n-attr="placeholder:key.notes_placeholder">
         </label>
       </div>
 
       <div class="qr-block">
-        <h4>QRコード（印刷用）</h4>
+        <h4 data-i18n="key.qr_title">QRコード（印刷用）</h4>
         <div id="qr" class="qr"></div>
         <div class="row">
-          <button id="btn-qrid" class="btn btn-tertiary" type="button">IDで生成</button>
-          <button id="btn-qruuid" class="btn btn-tertiary" type="button">UUIDで生成</button>
-          <button id="btn-qr-download" class="btn" type="button">PNG保存</button>
+          <button id="btn-qrid" class="btn btn-tertiary" type="button" data-i18n="key.qr_by_id">IDで生成</button>
+          <button id="btn-qruuid" class="btn btn-tertiary" type="button" data-i18n="key.qr_by_uuid">UUIDで生成</button>
+          <button id="btn-qr-download" class="btn" type="button" data-i18n="key.qr_download">PNG保存</button>
         </div>
         <div id="qr-info" class="qr-info"></div>
       </div>
 
       <div class="modal-footer">
         <button id="btn-key-delete" class="btn btn-danger btn-delete" type="button">
-          <span class="delete-icon">🗑️</span> この鍵を削除
+          <span class="delete-icon">🗑️</span> <span data-i18n="key.delete">この鍵を削除</span>
         </button>
         <menu class="modal-actions">
-          <button value="cancel" class="btn btn-tertiary" type="button" data-close-dialog>キャンセル</button>
-          <button id="btn-key-save" class="btn primary" type="submit">保存</button>
+          <button value="cancel" class="btn btn-tertiary" type="button" data-close-dialog data-i18n="common.cancel">キャンセル</button>
+          <button id="btn-key-save" class="btn primary" type="submit" data-i18n="common.save">保存</button>
         </menu>
       </div>
     </form>
@@ -253,31 +275,34 @@
   <!-- LOAN MODAL -->
   <dialog id="dlg-loan">
     <form id="form-loan" method="dialog" class="modal">
-      <h3>貸出登録</h3>
+      <h3 data-i18n="loan.title">貸出登録</h3>
       <div class="grid-2">
-        <label>鍵ID
+        <label><span data-i18n="loan.key_id">鍵ID</span>
           <input name="keyId" class="input" readonly>
         </label>
         <label>
-          <span>借主識別子<span class="required">*</span></span>
-          <input name="borrower" class="input" placeholder="emp-12345 or T.Yamada" required>
+          <span><span data-i18n="loan.borrower">借主識別子</span><span class="required">*</span></span>
+          <input name="borrower" class="input" placeholder="emp-12345 or T.Yamada" required
+                 data-i18n-attr="placeholder:loan.borrower_placeholder">
         </label>
       </div>
       <div class="grid-2">
-        <label>返却期限
+        <label><span data-i18n="loan.due">返却期限</span>
           <div class="input-with-icon">
             <span class="input-icon">📅</span>
-            <input name="dueAt" class="input input-datetime" type="datetime-local" placeholder="クリックして日時を選択">
+            <input name="dueAt" class="input input-datetime" type="datetime-local"
+                   placeholder="クリックして日時を選択" data-i18n-attr="placeholder:key.datetime_placeholder">
           </div>
-          <small class="input-hint">カレンダーから日時を選択できます</small>
+          <small class="input-hint" data-i18n="loan.due_hint">カレンダーから日時を選択できます</small>
         </label>
-        <label>メモ（貸出）
-          <input name="outNotes" class="input" placeholder="日中点検">
+        <label><span data-i18n="loan.notes">メモ（貸出）</span>
+          <input name="outNotes" class="input" placeholder="日中点検"
+                 data-i18n-attr="placeholder:loan.notes_placeholder">
         </label>
       </div>
       <menu class="modal-actions">
-        <button value="cancel" class="btn btn-tertiary" type="button" data-close-dialog>キャンセル</button>
-        <button id="btn-loan-save" class="btn primary" type="submit">登録</button>
+        <button value="cancel" class="btn btn-tertiary" type="button" data-close-dialog data-i18n="common.cancel">キャンセル</button>
+        <button id="btn-loan-save" class="btn primary" type="submit" data-i18n="loan.submit">登録</button>
       </menu>
     </form>
   </dialog>
@@ -285,21 +310,22 @@
   <!-- RETURN MODAL -->
   <dialog id="dlg-return">
     <form id="form-return" method="dialog" class="modal">
-      <h3>回収登録</h3>
+      <h3 data-i18n="return.title">回収登録</h3>
       <div class="grid-2">
-        <label>鍵ID
+        <label><span data-i18n="loan.key_id">鍵ID</span>
           <input name="keyId" class="input" readonly>
         </label>
-        <label>借主（参考）
+        <label><span data-i18n="return.borrower">借主（参考）</span>
           <input name="borrower" class="input" readonly>
         </label>
-        <label>返却メモ
-          <input name="inNotes" class="input" placeholder="破損なし">
+        <label><span data-i18n="return.notes">返却メモ</span>
+          <input name="inNotes" class="input" placeholder="破損なし"
+                 data-i18n-attr="placeholder:return.notes_placeholder">
         </label>
       </div>
       <menu class="modal-actions">
-        <button value="cancel" class="btn btn-tertiary" type="button" data-close-dialog>キャンセル</button>
-        <button id="btn-return-save" class="btn primary" type="submit">回収</button>
+        <button value="cancel" class="btn btn-tertiary" type="button" data-close-dialog data-i18n="common.cancel">キャンセル</button>
+        <button id="btn-return-save" class="btn primary" type="submit" data-i18n="return.submit">回収</button>
       </menu>
     </form>
   </dialog>
@@ -307,17 +333,17 @@
   <!-- AUDIT MODAL -->
   <dialog id="dlg-audit">
     <div class="modal">
-      <h3>監査ログ（最新が上）</h3>
-      <p class="audit-note">
+      <h3 data-i18n="audit.title">監査ログ（最新が上）</h3>
+      <p class="audit-note" data-i18n="audit.note">
         各エントリーは直前のエントリーのハッシュを含めて封じています（SHA-256）。
         書き換え・削除・挿入・並べ替えは「整合性を検証」で検出できます。
       </p>
       <div id="chain-result" class="chain-result" role="status" aria-live="polite"></div>
       <div class="audit-box" id="audit-box"></div>
       <menu class="modal-actions">
-        <button id="btn-chain-verify" class="btn btn-secondary">整合性を検証</button>
-        <button id="btn-audit-download" class="btn">JSONLダウンロード</button>
-        <button id="btn-audit-close" class="btn btn-tertiary">閉じる</button>
+        <button id="btn-chain-verify" class="btn btn-secondary" data-i18n="audit.verify">整合性を検証</button>
+        <button id="btn-audit-download" class="btn" data-i18n="audit.download">JSONLダウンロード</button>
+        <button id="btn-audit-close" class="btn btn-tertiary" data-i18n="common.close">閉じる</button>
       </menu>
     </div>
   </dialog>
@@ -325,24 +351,24 @@
   <!-- SETTINGS MODAL -->
   <dialog id="dlg-settings">
     <form id="form-settings" method="dialog" class="modal">
-      <h3>設定</h3>
+      <h3 data-i18n="settings.title">設定</h3>
       <div class="grid-2">
-        <label>プロフィール名（ログのactor）
+        <label><span data-i18n="settings.profile">プロフィール名（ログのactor）</span>
           <input name="profileName" class="input" placeholder="local-admin">
         </label>
-        <label>多重貸出しきい値（何本以上で警告するか）
+        <label><span data-i18n="settings.multi">多重貸出しきい値（何本以上で警告するか）</span>
           <input name="multiThreshold" class="input" type="number" min="2" max="99" value="4">
         </label>
-        <label>カードの有効期限を知らせる日数
+        <label><span data-i18n="settings.expiring">カードの有効期限を知らせる日数</span>
           <input name="expiringSoonDays" class="input" type="number" min="0" max="365" value="7">
         </label>
-        <label>マスターキーの長期貸出とみなす日数
+        <label><span data-i18n="settings.master">マスターキーの長期貸出とみなす日数</span>
           <input name="masterLoanDays" class="input" type="number" min="1" max="365" value="7">
         </label>
       </div>
       <menu class="modal-actions">
-        <button value="cancel" class="btn btn-tertiary" type="button" data-close-dialog>閉じる</button>
-        <button id="btn-settings-save" class="btn primary" type="submit">保存</button>
+        <button value="cancel" class="btn btn-tertiary" type="button" data-close-dialog data-i18n="common.close">閉じる</button>
+        <button id="btn-settings-save" class="btn primary" type="submit" data-i18n="common.save">保存</button>
       </menu>
     </form>
   </dialog>
@@ -350,9 +376,9 @@
   <!-- HELP MODAL -->
   <dialog id="dlg-help">
     <div class="modal modal-help">
-      <h3>📖 ヘルプ - Physical Key Ledger の使い方</h3>
+      <h3 data-i18n="help.title">📖 ヘルプ - Physical Key Ledger の使い方</h3>
       <div class="help-content">
-        <section class="help-section">
+        <section class="help-section" data-i18n-html="help.basic_html">
           <h4>🔰 基本的な使い方</h4>
           <ol>
             <li><strong>鍵を登録する</strong><br>
@@ -375,7 +401,7 @@
           </ol>
         </section>
 
-        <section class="help-section">
+        <section class="help-section" data-i18n-html="help.lifecycle_html">
           <h4>🔄 鍵のライフサイクル</h4>
           <div class="lifecycle">
             <div class="lifecycle-step">
@@ -400,7 +426,7 @@
           </div>
         </section>
 
-        <section class="help-section">
+        <section class="help-section" data-i18n-html="help.cautions_html">
           <h4>⚠️ 運用上の注意事項</h4>
           <ul>
             <li><strong>データ保存場所</strong><br>
@@ -420,7 +446,7 @@
           </ul>
         </section>
 
-        <section class="help-section">
+        <section class="help-section" data-i18n-html="help.qr_html">
           <h4>🏷️ QRコードの活用</h4>
           <ul>
             <li><strong>QRコード生成</strong><br>
@@ -439,7 +465,7 @@
           </ul>
         </section>
 
-        <section class="help-section">
+        <section class="help-section" data-i18n-html="help.audit_html">
           <h4>📊 監査ログ</h4>
           <ul>
             <li>すべての操作履歴が自動記録されます</li>
@@ -448,7 +474,7 @@
           </ul>
         </section>
 
-        <section class="help-section">
+        <section class="help-section" data-i18n-html="help.tips_html">
           <h4>💡 Tips</h4>
           <ul>
             <li><strong>カテゴリーと種別</strong><br>
@@ -467,14 +493,14 @@
         </section>
       </div>
       <menu class="modal-actions">
-        <button id="btn-help-close" class="btn primary" type="button">閉じる</button>
+        <button id="btn-help-close" class="btn primary" type="button" data-i18n="common.close">閉じる</button>
       </menu>
     </div>
   </dialog>
 
   <footer class="app-footer">
-    <div class="footer">
-      🔗 GitHubリポジトリはこちら（ <a href="https://github.com/ipusiron/physical-key-ledger" target="_blank" rel="noopener">ipusiron/physical-key-ledger</a> ）
+    <div class="footer" data-i18n-html="app.footer_html">
+      🔗 GitHubリポジトリーはこちら（ <a href="https://github.com/ipusiron/physical-key-ledger" target="_blank" rel="noopener">ipusiron/physical-key-ledger</a> ）
     </div>
   </footer>
 </body>

@@ -95,8 +95,17 @@ function auditDraft(action, entityId, diff) {
   };
 }
 
+// Carries the { key, vars } list so that ui.js can translate it.
+export class ValidationError extends Error {
+  constructor(errors) {
+    super(errors.map((e) => e.key).join(", "));
+    this.name = "ValidationError";
+    this.errors = errors;
+  }
+}
+
 function fail(errors) {
-  throw new Error(errors.join("\n"));
+  throw new ValidationError(errors);
 }
 
 // CRUD & flows
@@ -123,7 +132,7 @@ export async function upsertKey(keyObj, isNew) {
 }
 
 export async function deleteKey(uuid) {
-  if (!isUuid(uuid)) fail(["内部IDが不正です。"]);
+  if (!isUuid(uuid)) fail([{ key: "err.uuid_invalid" }]);
   await dbApi.deleteKeyWithAudit(state.db, uuid, auditDraft("key.delete", uuid, {}), sealAudit);
   await refreshCache();
 }
@@ -155,7 +164,7 @@ export async function createLoan({ keyUuid, borrower, dueAt, outNotes }) {
 
 export async function returnLoanByKeyUuid(keyUuid, inNotes) {
   const active = await dbApi.getActiveLoanByKey(state.db, keyUuid);
-  if (!active) fail(["この鍵の貸出レコードが見つかりません。"]);
+  if (!active) fail([{ key: "err.no_active_loan" }]);
 
   const loan = { ...active, returnedAt: nowMs(), inNotes: inNotes || null };
   const prevKey = state.cache.keys.find((k) => k.uuid === keyUuid);
@@ -225,11 +234,11 @@ export async function importJsonFile(file) {
   try {
     data = JSON.parse(text);
   } catch {
-    throw new Error("JSONとして読めませんでした。ファイルを確認してください。");
+    throw new ValidationError([{ key: "alert.import_not_json" }]);
   }
   const check = validateDataset(data);
   if (!check.ok) {
-    throw new Error(`台帳データとして読めないため、既存のデータは変更していません。\n${check.errors.join("\n")}`);
+    throw new ValidationError([{ key: "err.import_header" }, ...check.errors]);
   }
   await dbApi.importAllReplace(
     state.db,

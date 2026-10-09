@@ -11,10 +11,10 @@ import {
   escapeHtml, translateCategory, translateStatus, translateType, typeOptionsFor,
   formatRelativeTime, toLocalDatetimeInput, fromLocalDatetime,
   multiHoldingLabel, multiHoldingHeading, expiringHeading, expiryPhrase,
-  INCONSISTENCY_LABELS
+  inconsistencyLabel
 } from "./display.js";
 import { overdueHours } from "./anomaly.js";
-import { describeResult, REASON_LABELS } from "./audit-chain.js";
+import { applyI18n, pickLang, otherLang, t, fmt, LANG_STORAGE_KEY } from "./i18n.js";
 
 // Elements
 const els = {
@@ -42,6 +42,8 @@ const els = {
   btnAudit: document.getElementById("btn-audit"),
   btnSettings: document.getElementById("btn-settings"),
   btnMenu: document.getElementById("btn-menu"),
+  btnLang: document.getElementById("btn-lang"),
+  btnLangMobile: document.getElementById("btn-lang-mobile"),
   mobileMenu: document.getElementById("mobile-menu"),
   btnHelpMobile: document.getElementById("btn-help-mobile"),
   btnThemeMobile: document.getElementById("btn-theme-mobile"),
@@ -83,6 +85,9 @@ const els = {
 let currentKeyUuid = null;
 let isNewKey = true;
 let qrInstance = null;
+// Display language. Everything on screen is drawn from the dictionary,
+// so switching only redraws; nothing is recalculated.
+let lang = "ja";
 
 function renderKPIs() {
   const v = kpi();
@@ -97,15 +102,15 @@ function renderKPIs() {
 // instead of being written into the HTML.
 function renderThresholdLabels() {
   const n = state.settings.multiThreshold;
-  els.kpiMultiLabel.textContent = multiHoldingLabel(n);
-  els.headingMulti.textContent = multiHoldingHeading(n);
-  els.headingExpiring.textContent = expiringHeading(state.settings.expiringSoonDays);
+  els.kpiMultiLabel.textContent = multiHoldingLabel(lang, n);
+  els.headingMulti.textContent = multiHoldingHeading(lang, n);
+  els.headingExpiring.textContent = expiringHeading(lang, state.settings.expiringSoonDays);
 }
 
 function emptyListItem(ul) {
   ul.replaceChildren();
   const li = document.createElement("li");
-  li.textContent = "なし";
+  li.textContent = t(lang, "dash.none");
   ul.appendChild(li);
 }
 
@@ -120,7 +125,8 @@ function renderAnomalies() {
     for (const L of overdue) {
       const key = state.cache.keys.find(k => k.uuid === L.keyUuid);
       const li = document.createElement("li");
-      li.textContent = `返却期限を ${overdueHours(L, now)} 時間超過（${L.borrower} / ${key?.id || L.keyUuid}）`;
+      li.textContent = fmt(lang, "fmt.overdue_item",
+        { hours: overdueHours(L, now), borrower: L.borrower, id: key?.id || L.keyUuid });
       els.listOverdue.appendChild(li);
     }
   }
@@ -132,9 +138,11 @@ function renderAnomalies() {
     els.listMulti.replaceChildren();
     for (const m of multi) {
       const li = document.createElement("li");
-      const spellings = m.spellings.length > 1 ? `／表記ゆれ: ${m.spellings.join(", ")}` : "";
-      li.textContent =
-        `同一借主が ${m.count} 本の鍵を保持（${m.borrower} / しきい値 ${state.settings.multiThreshold}${spellings}）`;
+      const spellings = m.spellings.length > 1
+        ? fmt(lang, "fmt.multi_spellings", { list: m.spellings.join(", ") })
+        : "";
+      li.textContent = fmt(lang, "fmt.multi_item",
+        { count: m.count, borrower: m.borrower, threshold: state.settings.multiThreshold }) + spellings;
       els.listMulti.appendChild(li);
     }
   }
@@ -148,8 +156,9 @@ function renderAnomalies() {
     els.listExpiring.replaceChildren();
     for (const c of expiring) {
       const li = document.createElement("li");
-      const held = c.loaned ? `／貸出中: ${c.borrower}` : "";
-      li.textContent = `${c.id} ${c.name}: ${expiryPhrase(c)}${held}`;
+      const held = c.loaned ? fmt(lang, "fmt.expiring_held", { borrower: c.borrower }) : "";
+      li.textContent = fmt(lang, "fmt.expiring_item",
+        { id: c.id, name: c.name, phrase: expiryPhrase(lang, c) }) + held;
       if (c.expired) li.classList.add("warn-text");
       els.listExpiring.appendChild(li);
     }
@@ -159,14 +168,17 @@ function renderAnomalies() {
   // with no due date, and keys whose status does not match the records.
   const notices = [];
   for (const m of detectLongMasterLoan(now)) {
-    notices.push(`マスターキー ${m.id}「${m.name}」が ${m.days} 日間貸出中（${m.borrower}）`);
+    notices.push(fmt(lang, "fmt.master_item",
+      { id: m.id, name: m.name, days: m.days, borrower: m.borrower }));
   }
   for (const L of detectNoDueDate()) {
     const key = state.cache.keys.find(k => k.uuid === L.keyUuid);
-    notices.push(`返却期限が未設定の貸出（${L.borrower} / ${key?.id || L.keyUuid}）`);
+    notices.push(fmt(lang, "fmt.no_due_item",
+      { borrower: L.borrower, id: key?.id || L.keyUuid }));
   }
   for (const x of detectInconsistent()) {
-    notices.push(`${x.id}: ${INCONSISTENCY_LABELS[x.kind] || x.kind}`);
+    notices.push(fmt(lang, "fmt.inconsistent_item",
+      { id: x.id, reason: inconsistencyLabel(lang, x.kind) }));
   }
   if (notices.length === 0) {
     emptyListItem(els.listNotice);
@@ -205,28 +217,28 @@ function renderKeysTable() {
     const tr = document.createElement("tr");
     const activeLoan = state.cache.loans.find(L => L.keyUuid === k.uuid && L.returnedAt == null);
     const borrower = activeLoan?.borrower || "";
-    const dueAt = activeLoan?.dueAt ? formatRelativeTime(activeLoan.dueAt, Date.now()) : "";
+    const dueAt = activeLoan?.dueAt ? formatRelativeTime(activeLoan.dueAt, Date.now(), lang) : "";
     // Every interpolated value is escaped, including the uuid in the data
     // attribute: imported data must not be able to inject markup here.
     const uuid = escapeHtml(k.uuid);
     // Retired keys cannot be lent out, so no loan button is offered.
     const actionButton = k.status === "loaned"
-      ? `<button class="btn btn-secondary btn-sm" data-act="return" data-uuid="${uuid}">回収</button>`
+      ? `<button class="btn btn-secondary btn-sm" data-act="return" data-uuid="${uuid}">${escapeHtml(t(lang, "keys.return"))}</button>`
       : k.status === "stored"
-        ? `<button class="btn primary btn-sm" data-act="loan" data-uuid="${uuid}">貸出</button>`
+        ? `<button class="btn primary btn-sm" data-act="loan" data-uuid="${uuid}">${escapeHtml(t(lang, "keys.loan"))}</button>`
         : "";
 
     tr.innerHTML = `
       <td>${escapeHtml(k.id)}</td>
-      <td>${escapeHtml(translateCategory(k.category || "physical-key"))}</td>
+      <td>${escapeHtml(translateCategory(lang, k.category || "physical-key"))}</td>
       <td>${escapeHtml(k.name)}</td>
-      <td>${escapeHtml(translateType(k.type))}</td>
-      <td>${escapeHtml(translateStatus(k.status))}</td>
+      <td>${escapeHtml(translateType(lang, k.type))}</td>
+      <td>${escapeHtml(translateStatus(lang, k.status))}</td>
       <td>${escapeHtml(k.location || "")}</td>
       <td>${escapeHtml(borrower)}</td>
       <td>${escapeHtml(dueAt)}</td>
       <td class="row">
-        <button class="btn btn-tertiary btn-sm" data-act="edit" data-uuid="${uuid}">編集</button>
+        <button class="btn btn-tertiary btn-sm" data-act="edit" data-uuid="${uuid}">${escapeHtml(t(lang, "keys.edit"))}</button>
         ${actionButton}
       </td>
     `;
@@ -236,7 +248,7 @@ function renderKeysTable() {
   // Show empty state if no matches
   if (matchCount === 0) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="9" class="empty-state">該当する鍵がありません</td>`;
+    tr.innerHTML = `<td colspan="9" class="empty-state">${escapeHtml(t(lang, "keys.empty"))}</td>`;
     els.tbodyKeys.appendChild(tr);
   }
 }
@@ -247,10 +259,10 @@ function updateTypeOptions(category, selected) {
   const typeSelect = document.getElementById("key-type");
   const cardFields = document.getElementById("card-fields");
   typeSelect.replaceChildren();
-  for (const opt of typeOptionsFor(category)) {
+  for (const value of typeOptionsFor(category)) {
     const el = document.createElement("option");
-    el.value = opt.value;
-    el.textContent = opt.label;
+    el.value = value;
+    el.textContent = translateType(lang, value);
     typeSelect.appendChild(el);
   }
   if (selected) typeSelect.value = selected;
@@ -278,7 +290,7 @@ function field(form, name) {
 
 function openKeyModal(newKey = true, keyObj = null) {
   isNewKey = newKey;
-  els.dlgKeyTitle.textContent = newKey ? "鍵の新規登録" : "鍵の編集";
+  els.dlgKeyTitle.textContent = t(lang, newKey ? "key.new_title" : "key.edit_title");
   const form = els.formKey;
   const set = (name, value) => { field(form, name).value = value; };
   const blanks = ["id", "name", "location", "notes", "cardNumber", "accessLevel", "validFrom", "validUntil"];
@@ -308,13 +320,16 @@ function openKeyModal(newKey = true, keyObj = null) {
 }
 
 function clearQR() {
+  lastQrUrl = "";
   els.qrBox.replaceChildren();
   els.qrInfo.textContent = "";
   els.qrInfo.classList.remove("show");
   qrInstance = null;
 }
+let lastQrUrl = "";
 function showQRInfo(url) {
-  els.qrInfo.textContent = `📱 QRコード内容: ${url}`;
+  lastQrUrl = url;
+  els.qrInfo.textContent = fmt(lang, "fmt.qr_info", { url });
   els.qrInfo.classList.add("show");
 }
 function ensureQR() {
@@ -350,8 +365,14 @@ function readDeepLink() {
   };
 }
 
-const NOT_ON_THIS_DEVICE =
-  "台帳データは端末ごとに保存されるため、登録した端末・ブラウザーで開いてください。";
+// Turns an error from the domain layer into text in the current language.
+function errorText(err) {
+  if (err && Array.isArray(err.errors)) {
+    return err.errors.map((e) => fmt(lang, e.key, e.vars || {})).join("\n");
+  }
+  if (err && err.i18nKey) return t(lang, err.i18nKey);
+  return (err && err.message) || String(err);
+}
 
 // Opens the key named by the current URL, then takes it out of the address bar.
 async function handleDeepLink() {
@@ -359,11 +380,13 @@ async function handleDeepLink() {
   if (link.id != null) {
     const key = await dbApi.getKeyById(state.db, link.id);
     if (key) openKeyModal(false, key);
-    else alert([`鍵ID「${link.id}」はこの端末の台帳にありません。`, NOT_ON_THIS_DEVICE].join("\n"));
+    else alert([fmt(lang, "alert.not_on_device_id", { id: link.id }),
+      t(lang, "alert.not_on_device_hint")].join("\n"));
   } else if (link.key != null) {
     const key = await dbApi.getKeyByUuid(state.db, link.key);
     if (key) openKeyModal(false, key);
-    else alert([`鍵UUID「${link.key}」はこの端末の台帳にありません。`, NOT_ON_THIS_DEVICE].join("\n"));
+    else alert([fmt(lang, "alert.not_on_device_uuid", { id: link.key }),
+      t(lang, "alert.not_on_device_hint")].join("\n"));
   }
   if (link.hasQuery) clearDeepLink();
 }
@@ -389,7 +412,7 @@ function downloadQrPng() {
 // ============ Loan modal ============
 function openLoanModal(k) {
   const f = els.formLoan;
-  field(f, "keyId").value = `${k.id} (${k.uuid.slice(0, 8)})`;
+  field(f, "keyId").value = fmt(lang, "fmt.key_label", { id: k.id, short: k.uuid.slice(0, 8) });
   field(f, "borrower").value = "";
   field(f, "dueAt").value = "";
   field(f, "outNotes").value = "";
@@ -400,7 +423,7 @@ function openLoanModal(k) {
 // ============ Return modal ============
 function openReturnModal(k, activeLoan) {
   const f = els.formReturn;
-  field(f, "keyId").value = `${k.id} (${k.uuid.slice(0, 8)})`;
+  field(f, "keyId").value = fmt(lang, "fmt.key_label", { id: k.id, short: k.uuid.slice(0, 8) });
   field(f, "borrower").value = activeLoan?.borrower || "";
   field(f, "inNotes").value = "";
   els.dlgReturn.showModal();
@@ -411,7 +434,7 @@ function openReturnModal(k, activeLoan) {
 async function openAuditModal() {
   const logs = await getAuditLog(1000);
   const lines = logs.map(l => JSON.stringify(l)).join("\n");
-  els.auditBox.textContent = lines || "(ログなし)";
+  els.auditBox.textContent = lines || t(lang, "audit.empty");
   // The result belongs to the moment it was produced, so it does not
   // survive reopening the dialog.
   clearChainResult();
@@ -423,6 +446,25 @@ function clearChainResult() {
   els.chainResult.classList.remove("ok", "ng");
 }
 
+function breakWhere(b) {
+  return b.seq == null ? t(lang, "chain.where_unknown") : fmt(lang, "chain.where", { seq: b.seq });
+}
+
+function breakReason(b) {
+  return t(lang, `chain.reason.${b.reason}`, b.reason);
+}
+
+// One line describing the verification result.
+function chainSummary(r) {
+  if (r.total === 0) return t(lang, "chain.empty");
+  if (r.checked === 0) return fmt(lang, "chain.all_unchained", { total: r.total });
+  const skipped = r.unchained > 0 ? fmt(lang, "chain.skipped", { n: r.unchained }) : "";
+  if (r.ok) return fmt(lang, "chain.ok", { checked: r.checked, skipped });
+  const first = r.breaks[0];
+  return fmt(lang, "chain.ng",
+    { checked: r.checked, skipped, where: breakWhere(first), reason: breakReason(first) });
+}
+
 // Recomputes the hash chain and reports what it found.
 async function runChainVerification() {
   const r = await verifyAuditChain();
@@ -432,7 +474,7 @@ async function runChainVerification() {
 
   const summary = document.createElement("p");
   summary.className = "chain-summary";
-  summary.textContent = `${r.ok ? "✅" : "⚠"} ${describeResult(r)}`;
+  summary.textContent = `${r.ok ? "✅" : "⚠"} ${chainSummary(r)}`;
   els.chainResult.appendChild(summary);
 
   // With a single break the summary already names it, so a list would
@@ -442,14 +484,14 @@ async function runChainVerification() {
     ul.className = "bullet-list";
     for (const b of r.breaks.slice(0, 10)) {
       const li = document.createElement("li");
-      const where = b.seq == null ? "位置不明" : `seq ${b.seq}`;
-      li.textContent = `${where}: ${REASON_LABELS[b.reason] || b.reason}`;
+      li.textContent = fmt(lang, "chain.item",
+        { where: breakWhere(b), reason: breakReason(b) });
       ul.appendChild(li);
     }
     els.chainResult.appendChild(ul);
     if (r.breaks.length > 10) {
       const more = document.createElement("p");
-      more.textContent = `ほか ${r.breaks.length - 10} 件`;
+      more.textContent = fmt(lang, "chain.more", { n: r.breaks.length - 10 });
       els.chainResult.appendChild(more);
     }
   }
@@ -472,8 +514,53 @@ function updateThemeIcon() {
 }
 
 // ============ Events ============
+// ============ Language ============
+function readStored(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStored(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Private mode or blocked storage: the choice just does not persist.
+  }
+}
+
+// Redraws everything in the other language. Nothing is recalculated: the
+// ledger is read from the cache and the text comes from the dictionary.
+async function switchLang(next) {
+  lang = next;
+  writeStored(LANG_STORAGE_KEY, lang);
+  applyI18n(document, lang);
+  if (els.dlgKey.open) {
+    // applyI18n writes the generic modal title, so put the right one back
+    els.dlgKeyTitle.textContent = t(lang, isNewKey ? "key.new_title" : "key.edit_title");
+    const category = field(els.formKey, "category").value;
+    const type = field(els.formKey, "type").value;
+    updateTypeOptions(category, type);
+  }
+  if (lastQrUrl) els.qrInfo.textContent = fmt(lang, "fmt.qr_info", { url: lastQrUrl });
+  clearChainResult();
+  await rerenderAll();
+}
+
 window.addEventListener("DOMContentLoaded", async () => {
   await initLogic();
+
+  // Language: ?lang= wins, then the saved choice, then the browser
+  const urlLang = new URL(location.href).searchParams.get("lang");
+  lang = pickLang({
+    urlLang,
+    savedLang: readStored(LANG_STORAGE_KEY),
+    browserLang: navigator.language
+  });
+  if (urlLang) writeStored(LANG_STORAGE_KEY, lang);
+  applyI18n(document, lang);
 
   // Apply theme immediately
   applyTheme();
@@ -549,19 +636,19 @@ window.addEventListener("DOMContentLoaded", async () => {
       els.dlgKey.close();
       await rerenderAll();
     } catch (err) {
-      alert(err.message || String(err));
+      alert(errorText(err));
     }
   });
 
   els.btnKeyDelete.addEventListener("click", async () => {
     if (!currentKeyUuid) return;
-    if (!confirm("この鍵を削除します。よろしいですか？（貸出中は削除不可）")) return;
+    if (!confirm(t(lang, "key.delete_confirm"))) return;
     try {
       await deleteKey(currentKeyUuid);
       els.dlgKey.close();
       await rerenderAll();
     } catch (err) {
-      alert(err.message || String(err));
+      alert(errorText(err));
     }
   });
 
@@ -595,7 +682,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       els.dlgLoan.close();
       await rerenderAll();
     } catch (err) {
-      alert(err.message || String(err));
+      alert(errorText(err));
     }
   });
 
@@ -608,7 +695,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       els.dlgReturn.close();
       await rerenderAll();
     } catch (err) {
-      alert(err.message || String(err));
+      alert(errorText(err));
     }
   });
 
@@ -617,7 +704,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   async function handleImportFile(e, closeMenu) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!confirm("JSONデータで全置換します。よろしいですか？")) {
+    if (!confirm(t(lang, "alert.import_confirm"))) {
       e.target.value = "";
       if (closeMenu) els.mobileMenu.classList.add("hidden");
       return;
@@ -625,9 +712,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     try {
       const counts = await importJsonFile(file);
       await rerenderAll();
-      alert(`インポート完了（鍵 ${counts.keys} 件 / 貸出 ${counts.loans} 件 / 監査ログ ${counts.audit} 件）`);
+      alert(fmt(lang, "alert.import_done",
+        { keys: counts.keys, loans: counts.loans, audit: counts.audit }));
     } catch (err) {
-      alert(["インポート失敗", err.message || String(err)].join("\n"));
+      alert([t(lang, "alert.import_failed"), errorText(err)].join("\n"));
     } finally {
       e.target.value = "";
       if (closeMenu) els.mobileMenu.classList.add("hidden");
@@ -642,7 +730,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     try {
       await runChainVerification();
     } catch (err) {
-      alert(["整合性の検証に失敗しました", err.message || String(err)].join("\n"));
+      alert([t(lang, "chain.failed"), errorText(err)].join("\n"));
     } finally {
       els.btnChainVerify.disabled = false;
     }
@@ -690,6 +778,13 @@ window.addEventListener("DOMContentLoaded", async () => {
   els.btnThemeMobile.addEventListener("click", () => {
     toggleTheme();
     updateThemeIcon();
+    els.mobileMenu.classList.add("hidden");
+  });
+
+  // Language toggle
+  els.btnLang.addEventListener("click", () => { switchLang(otherLang(lang)); });
+  els.btnLangMobile.addEventListener("click", () => {
+    switchLang(otherLang(lang));
     els.mobileMenu.classList.add("hidden");
   });
 
