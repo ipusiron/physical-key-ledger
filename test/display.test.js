@@ -5,7 +5,8 @@ import {
   translateCategory, translateStatus, translateType,
   escapeHtml, formatRelativeTime, formatLocalDateTime,
   fromLocalDatetime, toLocalDatetimeInput,
-  multiHoldingLabel, multiHoldingHeading
+  multiHoldingLabel, multiHoldingHeading, expiringHeading, expiryPhrase,
+  INCONSISTENCY_LABELS
 } from "../js/display.js";
 
 test("カテゴリーと状態の一覧が仕様どおり", () => {
@@ -80,4 +81,19 @@ test("しきい値のラベルは設定値から組み立てる", () => {
   assert.equal(multiHoldingLabel(4), "多重貸出(4本以上)");
   assert.equal(multiHoldingLabel(2), "多重貸出(2本以上)");
   assert.equal(multiHoldingHeading(2), "多重貸出（同一借主が2本以上保持）");
+});
+
+test("カードの期限の文言", () => {
+  assert.equal(expiringHeading(7), "カードの有効期限（7日以内・切れ）");
+  assert.equal(expiringHeading(0), "カードの有効期限（0日以内・切れ）");
+  assert.equal(expiryPhrase({ expired: true, daysOver: 3 }), "3日前に期限切れ");
+  assert.equal(expiryPhrase({ expired: true, daysOver: 0 }), "本日期限切れ");
+  assert.equal(expiryPhrase({ expired: false, daysLeft: 0 }), "本日まで有効");
+  assert.equal(expiryPhrase({ expired: false, daysLeft: 5 }), "あと5日で期限切れ");
+});
+
+test("食い違いのラベルが両方そろっている", () => {
+  assert.deepEqual(Object.keys(INCONSISTENCY_LABELS).sort(),
+    ["loaned-without-record", "record-without-loaned"]);
+  for (const v of Object.values(INCONSISTENCY_LABELS)) assert.ok(v.length > 0);
 });

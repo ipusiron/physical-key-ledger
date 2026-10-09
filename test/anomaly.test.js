@@ -109,6 +109,13 @@ test("期限切れカードは廃止を除き、貸出中かどうかも返す",
   assert.equal(r[0].borrower, "T.Yamada");
   assert.equal(r[1].expired, false);
   assert.equal(r[1].daysLeft, 3);
+  assert.equal(r[1].daysOver, 0);
+  // 3日と少し過ぎている場合は「3日」と数える（切り上げない）
+  const late = detectExpiredCards(
+    [key(7, { category: "ic-card", type: "visitor", validUntil: NOW - 3 * DAY - HOUR })],
+    [], NOW, 7);
+  assert.equal(late[0].daysOver, 3);
+  assert.equal(late[0].daysLeft, 0);
   assert.equal(r[1].loaned, false);
 });
 

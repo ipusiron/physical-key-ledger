@@ -77,7 +77,7 @@ test("検索欄とセレクトに名前が付いている", () => {
   const labels = html.match(/aria-label="/g) || [];
   assert.ok(labels.length >= 5, `aria-label が ${labels.length} 件しかない`);
   const lives = html.match(/aria-live="polite"/g) || [];
-  assert.ok(lives.length >= 3, `aria-live が ${lives.length} 件しかない`);
+  assert.ok(lives.length >= 5, `aria-live が ${lives.length} 件しかない`);
 });
 
 test("主要な要素のidが残っている", () => {
@@ -87,7 +87,9 @@ test("主要な要素のidが残っている", () => {
     "filter-category", "filter-status", "btn-new-key", "dlg-key", "form-key",
     "dlg-loan", "form-loan", "dlg-return", "form-return", "dlg-audit",
     "audit-box", "dlg-settings", "form-settings", "dlg-help", "card-fields",
-    "key-category", "key-type", "qr", "qr-info", "mobile-menu"
+    "key-category", "key-type", "qr", "qr-info", "mobile-menu",
+    "kpi-expiring", "kpi-expiring-label", "heading-expiring", "list-expiring",
+    "list-notice", "btn-chain-verify", "chain-result"
   ];
   for (const id of ids) {
     assert.ok(html.includes(`id="${id}"`), `id="${id}" がない`);

@@ -129,3 +129,20 @@ export function multiHoldingLabel(threshold) {
 export function multiHoldingHeading(threshold) {
   return `多重貸出（同一借主が${threshold}本以上保持）`;
 }
+
+export function expiringHeading(days) {
+  return `カードの有効期限（${days}日以内・切れ）`;
+}
+
+// "3日後に期限切れ" / "2日前に期限切れ" for a card.
+export function expiryPhrase(card) {
+  if (card.expired) {
+    return card.daysOver === 0 ? "本日期限切れ" : `${card.daysOver}日前に期限切れ`;
+  }
+  return card.daysLeft === 0 ? "本日まで有効" : `あと${card.daysLeft}日で期限切れ`;
+}
+
+export const INCONSISTENCY_LABELS = {
+  "loaned-without-record": "状態は貸出中だが、貸出の記録がない",
+  "record-without-loaned": "貸出の記録があるが、状態が貸出中になっていない"
+};

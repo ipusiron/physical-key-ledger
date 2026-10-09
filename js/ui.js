@@ -3,13 +3,15 @@ import {
   initLogic, refreshCache, state, upsertKey, deleteKey,
   createLoan, returnLoanByKeyUuid, detectOverdue, detectMultiHolding, kpi,
   exportJson, importJsonFile, getAuditLog, saveSettings, verifyAuditChain,
+  detectExpiredCards, detectLongMasterLoan, detectNoDueDate, detectInconsistent,
   genUuid, toggleTheme, applyTheme
 } from "./logic.js";
 import { dbApi } from "./db.js";
 import {
   escapeHtml, translateCategory, translateStatus, translateType, typeOptionsFor,
   formatRelativeTime, toLocalDatetimeInput, fromLocalDatetime,
-  multiHoldingLabel, multiHoldingHeading
+  multiHoldingLabel, multiHoldingHeading, expiringHeading, expiryPhrase,
+  INCONSISTENCY_LABELS
 } from "./display.js";
 import { overdueHours } from "./anomaly.js";
 import { describeResult, REASON_LABELS } from "./audit-chain.js";
@@ -24,6 +26,10 @@ const els = {
   listMulti: document.getElementById("list-multi"),
   kpiMultiLabel: document.getElementById("kpi-multi-label"),
   headingMulti: document.getElementById("heading-multi"),
+  kpiExpiring: document.getElementById("kpi-expiring"),
+  headingExpiring: document.getElementById("heading-expiring"),
+  listExpiring: document.getElementById("list-expiring"),
+  listNotice: document.getElementById("list-notice"),
   search: document.getElementById("search"),
   filterCategory: document.getElementById("filter-category"),
   filterStatus: document.getElementById("filter-status"),
@@ -84,6 +90,7 @@ function renderKPIs() {
   els.kpiLoaned.textContent = v.loaned;
   els.kpiOverdue.textContent = v.overdue;
   els.kpiMulti.textContent = v.multi;
+  els.kpiExpiring.textContent = v.expiring;
 }
 
 // Labels that depend on the configured threshold are built from the setting
@@ -92,6 +99,7 @@ function renderThresholdLabels() {
   const n = state.settings.multiThreshold;
   els.kpiMultiLabel.textContent = multiHoldingLabel(n);
   els.headingMulti.textContent = multiHoldingHeading(n);
+  els.headingExpiring.textContent = expiringHeading(state.settings.expiringSoonDays);
 }
 
 function emptyListItem(ul) {
@@ -128,6 +136,46 @@ function renderAnomalies() {
       li.textContent =
         `同一借主が ${m.count} 本の鍵を保持（${m.borrower} / しきい値 ${state.settings.multiThreshold}${spellings}）`;
       els.listMulti.appendChild(li);
+    }
+  }
+
+  // Cards whose validity is about to run out, or already has. These dates
+  // were being stored and never used.
+  const expiring = detectExpiredCards(now);
+  if (expiring.length === 0) {
+    emptyListItem(els.listExpiring);
+  } else {
+    els.listExpiring.replaceChildren();
+    for (const c of expiring) {
+      const li = document.createElement("li");
+      const held = c.loaned ? `／貸出中: ${c.borrower}` : "";
+      li.textContent = `${c.id} ${c.name}: ${expiryPhrase(c)}${held}`;
+      if (c.expired) li.classList.add("warn-text");
+      els.listExpiring.appendChild(li);
+    }
+  }
+
+  // Everything else worth a look: master keys out for a long time, loans
+  // with no due date, and keys whose status does not match the records.
+  const notices = [];
+  for (const m of detectLongMasterLoan(now)) {
+    notices.push(`マスターキー ${m.id}「${m.name}」が ${m.days} 日間貸出中（${m.borrower}）`);
+  }
+  for (const L of detectNoDueDate()) {
+    const key = state.cache.keys.find(k => k.uuid === L.keyUuid);
+    notices.push(`返却期限が未設定の貸出（${L.borrower} / ${key?.id || L.keyUuid}）`);
+  }
+  for (const x of detectInconsistent()) {
+    notices.push(`${x.id}: ${INCONSISTENCY_LABELS[x.kind] || x.kind}`);
+  }
+  if (notices.length === 0) {
+    emptyListItem(els.listNotice);
+  } else {
+    els.listNotice.replaceChildren();
+    for (const text of notices) {
+      const li = document.createElement("li");
+      li.textContent = text;
+      els.listNotice.appendChild(li);
     }
   }
 }
@@ -411,7 +459,9 @@ async function runChainVerification() {
 function openSettingsModal() {
   const f = els.formSettings;
   field(f, "profileName").value = state.settings.profileName || "local-admin";
-  field(f, "multiThreshold").value = state.settings.multiThreshold || 4;
+  field(f, "multiThreshold").value = state.settings.multiThreshold;
+  field(f, "expiringSoonDays").value = state.settings.expiringSoonDays;
+  field(f, "masterLoanDays").value = state.settings.masterLoanDays;
   els.dlgSettings.showModal();
 }
 
@@ -616,7 +666,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     const f = els.formSettings;
     await saveSettings({
       profileName: field(f, "profileName").value.trim(),
-      multiThreshold: Number(field(f, "multiThreshold").value) || 4,
+      multiThreshold: field(f, "multiThreshold").value,
+      expiringSoonDays: field(f, "expiringSoonDays").value,
+      masterLoanDays: field(f, "masterLoanDays").value,
     });
     els.dlgSettings.close();
     await rerenderAll();

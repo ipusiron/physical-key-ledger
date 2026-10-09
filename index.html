@@ -87,6 +87,10 @@
             <div id="kpi-multi-label">多重貸出(4本以上)</div>
             <span id="kpi-multi">0</span>
           </div>
+          <div class="kpi-item warn">
+            <div id="kpi-expiring-label">期限切れ・間近のカード</div>
+            <span id="kpi-expiring">0</span>
+          </div>
         </div>
       </div>
       <div class="card-body grid-2">
@@ -97,6 +101,14 @@
         <div>
           <h3 id="heading-multi">多重貸出（同一借主が4本以上保持）</h3>
           <ul id="list-multi" class="bullet-list" aria-live="polite"></ul>
+        </div>
+        <div>
+          <h3 id="heading-expiring">カードの有効期限（7日以内・切れ）</h3>
+          <ul id="list-expiring" class="bullet-list" aria-live="polite"></ul>
+        </div>
+        <div>
+          <h3>そのほかの注意</h3>
+          <ul id="list-notice" class="bullet-list" aria-live="polite"></ul>
         </div>
       </div>
     </section>
@@ -318,8 +330,14 @@
         <label>プロフィール名（ログのactor）
           <input name="profileName" class="input" placeholder="local-admin">
         </label>
-        <label>多重貸出しきい値（固定値推奨）
-          <input name="multiThreshold" class="input" type="number" min="2" value="4">
+        <label>多重貸出しきい値（何本以上で警告するか）
+          <input name="multiThreshold" class="input" type="number" min="2" max="99" value="4">
+        </label>
+        <label>カードの有効期限を知らせる日数
+          <input name="expiringSoonDays" class="input" type="number" min="0" max="365" value="7">
+        </label>
+        <label>マスターキーの長期貸出とみなす日数
+          <input name="masterLoanDays" class="input" type="number" min="1" max="365" value="7">
         </label>
       </div>
       <menu class="modal-actions">
