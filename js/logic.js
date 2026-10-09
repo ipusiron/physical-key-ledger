@@ -204,7 +204,9 @@ export async function exportJson() {
   a.href = URL.createObjectURL(blob);
   const ts = new Date();
   const pad = (n) => String(n).padStart(2,"0");
-  const name = `pkledger-export-${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}-${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}.json`;
+  const date = `${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}`;
+  const time = `${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}`;
+  const name = `pkledger-export-${date}-${time}.json`;
   a.download = name;
   a.click();
   URL.revokeObjectURL(a.href);
