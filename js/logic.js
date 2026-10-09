@@ -1,8 +1,12 @@
 // logic.js - stateful domain layer. Pure calculations live in
 // display.js / anomaly.js / validate.js so that they can be tested with node.
-import { openDB, dbApi } from "./db.js";
+import { openDB, dbApi, CHAIN_HEAD_KEY } from "./db.js";
+import { sealEntry, verifyChain } from "./audit-chain.js";
 import * as anomaly from "./anomaly.js";
 import { validateDataset, validateKeyInput, validateLoanInput, isUuid } from "./validate.js";
+
+// Every audit entry is sealed into the hash chain before it is stored.
+const sealAudit = sealEntry;
 
 export const state = {
   db: null,
@@ -12,17 +16,25 @@ export const state = {
   },
   settings: {
     profileName: "local-admin",
-    multiThreshold: 4
+    multiThreshold: 4,
+    expiringSoonDays: 7,
+    masterLoanDays: 7
   },
   theme: "dark" // "light" or "dark"
 };
 
 export async function initLogic() {
   state.db = await openDB();
-  const name = await dbApi.getSetting(state.db, "profileName");
-  const mt = await dbApi.getSetting(state.db, "multiThreshold");
+  const [name, mt, soon, master] = await Promise.all([
+    dbApi.getSetting(state.db, "profileName"),
+    dbApi.getSetting(state.db, "multiThreshold"),
+    dbApi.getSetting(state.db, "expiringSoonDays"),
+    dbApi.getSetting(state.db, "masterLoanDays")
+  ]);
   if (name) state.settings.profileName = name;
-  if (mt) state.settings.multiThreshold = Number(mt) || 4;
+  if (mt != null) state.settings.multiThreshold = clampInt(mt, 2, 99, 4);
+  if (soon != null) state.settings.expiringSoonDays = clampInt(soon, 0, 365, 7);
+  if (master != null) state.settings.masterLoanDays = clampInt(master, 1, 365, 7);
 
   // Theme lives in localStorage so that it applies before the database opens.
   let savedTheme = null;
@@ -83,8 +95,17 @@ function auditDraft(action, entityId, diff) {
   };
 }
 
+// Carries the { key, vars } list so that ui.js can translate it.
+export class ValidationError extends Error {
+  constructor(errors) {
+    super(errors.map((e) => e.key).join(", "));
+    this.name = "ValidationError";
+    this.errors = errors;
+  }
+}
+
 function fail(errors) {
-  throw new Error(errors.join("\n"));
+  throw new ValidationError(errors);
 }
 
 // CRUD & flows
@@ -111,7 +132,7 @@ export async function upsertKey(keyObj, isNew) {
 }
 
 export async function deleteKey(uuid) {
-  if (!isUuid(uuid)) fail(["内部IDが不正です。"]);
+  if (!isUuid(uuid)) fail([{ key: "err.uuid_invalid" }]);
   await dbApi.deleteKeyWithAudit(state.db, uuid, auditDraft("key.delete", uuid, {}), sealAudit);
   await refreshCache();
 }
@@ -143,7 +164,7 @@ export async function createLoan({ keyUuid, borrower, dueAt, outNotes }) {
 
 export async function returnLoanByKeyUuid(keyUuid, inNotes) {
   const active = await dbApi.getActiveLoanByKey(state.db, keyUuid);
-  if (!active) fail(["この鍵の貸出レコードが見つかりません。"]);
+  if (!active) fail([{ key: "err.no_active_loan" }]);
 
   const loan = { ...active, returnedAt: nowMs(), inNotes: inNotes || null };
   const prevKey = state.cache.keys.find((k) => k.uuid === keyUuid);
@@ -171,10 +192,15 @@ export function detectMultiHolding() {
   return anomaly.detectMultiHolding(state.cache.loans, state.settings.multiThreshold);
 }
 export function detectExpiredCards(now = nowMs()) {
-  return anomaly.detectExpiredCards(state.cache.keys, state.cache.loans, now);
+  return anomaly.detectExpiredCards(state.cache.keys, state.cache.loans, now,
+    state.settings.expiringSoonDays);
 }
 export function detectLongMasterLoan(now = nowMs()) {
-  return anomaly.detectLongMasterLoan(state.cache.keys, state.cache.loans, now);
+  return anomaly.detectLongMasterLoan(state.cache.keys, state.cache.loans, now,
+    state.settings.masterLoanDays);
+}
+export function detectNoDueDate() {
+  return anomaly.detectNoDueDate(state.cache.loans);
 }
 export function detectInconsistent() {
   return anomaly.detectInconsistent(state.cache.keys, state.cache.loans);
@@ -208,11 +234,11 @@ export async function importJsonFile(file) {
   try {
     data = JSON.parse(text);
   } catch {
-    throw new Error("JSONとして読めませんでした。ファイルを確認してください。");
+    throw new ValidationError([{ key: "alert.import_not_json" }]);
   }
   const check = validateDataset(data);
   if (!check.ok) {
-    throw new Error(`台帳データとして読めないため、既存のデータは変更していません。\n${check.errors.join("\n")}`);
+    throw new ValidationError([{ key: "err.import_header" }, ...check.errors]);
   }
   await dbApi.importAllReplace(
     state.db,
@@ -232,19 +258,32 @@ export async function getAuditLogAsc(limit = 100000) {
   return dbApi.getAllAuditAsc(state.db, limit);
 }
 
-// Hook for the audit hash chain (filled in by audit-chain.js).
-let sealAudit = null;
-export function setAuditSealer(fn) {
-  sealAudit = fn;
+// Recomputes the whole chain and compares it with the head kept in settings.
+export async function verifyAuditChain() {
+  const [entries, head] = await Promise.all([
+    dbApi.getAllAuditAsc(state.db),
+    dbApi.getSetting(state.db, CHAIN_HEAD_KEY)
+  ]);
+  return verifyChain(entries, head);
 }
 
 // settings
-export async function saveSettings({ profileName, multiThreshold }) {
+export function clampInt(value, min, max, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  const i = Math.round(n);
+  if (i < min || i > max) return fallback;
+  return i;
+}
+
+export async function saveSettings({ profileName, multiThreshold, expiringSoonDays, masterLoanDays }) {
   state.settings.profileName = (profileName || "local-admin").slice(0, 200);
-  const n = Number(multiThreshold);
-  state.settings.multiThreshold = Number.isInteger(n) && n >= 2 ? n : 4;
-  await dbApi.setSetting(state.db, "profileName", state.settings.profileName);
-  await dbApi.setSetting(state.db, "multiThreshold", state.settings.multiThreshold);
+  state.settings.multiThreshold = clampInt(multiThreshold, 2, 99, 4);
+  state.settings.expiringSoonDays = clampInt(expiringSoonDays, 0, 365, 7);
+  state.settings.masterLoanDays = clampInt(masterLoanDays, 1, 365, 7);
+  for (const key of ["profileName", "multiThreshold", "expiringSoonDays", "masterLoanDays"]) {
+    await dbApi.setSetting(state.db, key, state.settings[key]);
+  }
 }
 
 // theme

@@ -211,6 +211,9 @@ a { color: var(--accent); }
    line and pushes the table below the fold. */
 #keys .card-header .row .input { width: auto; flex: 1 1 200px; }
 #keys .card-header .row .btn { flex: 0 0 auto; }
+/* Keep the two buttons of the actions column on one line: in English
+   they are wider and used to stack on top of each other. */
+.table td.row { flex-wrap: nowrap; }
 
 .kpi { display: flex; gap: 16px; flex-wrap: wrap; }
 .kpi-item {
@@ -514,6 +517,27 @@ dialog::backdrop { background: rgba(0,0,0,.6); }
   padding: 10px; max-height: 60vh; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono","Noto Sans Mono", monospace;
   white-space: pre-wrap;
 }
+
+.audit-note {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.chain-result {
+  margin: 0 0 12px;
+  padding: 0;
+}
+.chain-result:not(:empty) {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.chain-result.ok { border-color: var(--ok); }
+.chain-result.ng { border-color: var(--warn); }
+.chain-result p { margin: 0; }
+.chain-result .bullet-list { margin-top: 8px; }
+.chain-summary { font-weight: 600; }
 
 .modal-help {
   max-width: min(800px, 92vw);

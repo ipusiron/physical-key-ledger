@@ -83,7 +83,11 @@ export function detectExpiredCards(keys, loans, now, soonDays = DEFAULTS.expirin
       name: k.name,
       validUntil: k.validUntil,
       expired: remainMs < 0,
-      daysLeft: Math.floor(remainMs / DAY),
+      // Whole days remaining, and whole days since it expired. Both are
+      // counted downwards from the absolute gap, so 3.2 days late reads as
+      // "3 days", not "4".
+      daysLeft: remainMs < 0 ? 0 : Math.floor(remainMs / DAY),
+      daysOver: remainMs < 0 ? Math.floor(-remainMs / DAY) : 0,
       loaned: active.has(k.uuid),
       borrower: active.get(k.uuid)?.borrower || ""
     });

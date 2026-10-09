@@ -187,3 +187,85 @@ test("日本語と英数字の間に半角スペースを入れていない", ()
       `README.md:${i + 1} 日本語と英数字の間に空白がある: ${line.trim().slice(0, 60)}`);
   });
 });
+
+// ---- English README -------------------------------------------------
+const readmeEn = readFileSync(join(ROOT, "README.en.md"), "utf8");
+
+function headings(text) {
+  const out = [];
+  let inCode = false;
+  for (const line of text.split("\n")) {
+    if (line.trim().startsWith("```")) { inCode = !inCode; continue; }
+    if (!inCode && /^#{1,3} /.test(line)) out.push(line);
+  }
+  return out;
+}
+
+test("日英のREADMEが互いにリンクしている", () => {
+  assert.equal(readmeEn.split("\n")[0], "English · [日本語](README.md)");
+  assert.ok(readme.includes("[English](README.en.md) · 日本語"));
+  // YAMLメタデータは日本語版だけに置く（hackinglab.online が読むのは README.md）
+  assert.ok(!readmeEn.includes("slug: physical-key-ledger"));
+});
+
+test("英語版は日本語版と同じ見出しの数・順・階層を持つ", () => {
+  const hja = headings(readme);
+  const hen = headings(readmeEn);
+  assert.equal(hen.length, hja.length, `見出しの数が違う（ja ${hja.length} / en ${hen.length}）`);
+  hja.forEach((h, i) => {
+    const level = (s) => s.match(/^#+/)[0].length;
+    assert.equal(level(hen[i]), level(h), `${i + 1}番目の見出しの階層が違う: ${h} / ${hen[i]}`);
+  });
+});
+
+test("英語版の画像がすべて実在し、assets/en の画像はすべて参照されている", () => {
+  const refs = [...readmeEn.matchAll(/!\[[^\]]*\]\((assets\/en\/[^)]+)\)/g)].map((m) => m[1]);
+  assert.ok(refs.length >= 4, `画像の参照が ${refs.length} 件しかない`);
+  for (const r of refs) assert.ok(existsSync(join(ROOT, r)), `${r} が存在しない`);
+  const files = readdirSync(join(ROOT, "assets", "en")).filter((f) => /\.png$/i.test(f));
+  for (const f of files) {
+    assert.ok(refs.includes(`assets/en/${f}`), `assets/en/${f} が参照されていない`);
+  }
+});
+
+test("英語版の多重保持の表も計算し直す", () => {
+  const loans = [
+    { loanId: "L-1", keyUuid: "k1", borrower: "A", loanedAt: 1, dueAt: null, returnedAt: null },
+    { loanId: "L-2", keyUuid: "k2", borrower: "A", loanedAt: 1, dueAt: null, returnedAt: null },
+    { loanId: "L-3", keyUuid: "k3", borrower: "A", loanedAt: 1, dueAt: null, returnedAt: null },
+    { loanId: "L-4", keyUuid: "k4", borrower: "B", loanedAt: 1, dueAt: null, returnedAt: null }
+  ];
+  const i = readmeEn.indexOf("| Threshold | Reported | Who |");
+  assert.notEqual(i, -1, "しきい値の表が英語版にない");
+  const block = readmeEn.slice(i, readmeEn.indexOf("\n\n", i));
+  const rows = tableRows(block).filter((cells) => /^\d+$/.test(cells[0]));
+  assert.equal(rows.length, 4);
+  for (const [thresholdText, countText] of rows) {
+    assert.equal(Number(countText), detectMultiHolding(loans, Number(thresholdText)).length,
+      `しきい値 ${thresholdText} の件数が英語版で合わない`);
+  }
+  assert.ok(readmeEn.includes("Overdue by 26 hours") || readmeEn.includes("26 hours overdue"),
+    "キャプションの超過時間が英語版にない");
+});
+
+test("英語版に日本語が残っていない（1行目とコードブロックを除く）", () => {
+  const ja = /[぀-ヿ㐀-鿿]/;
+  const lines = readmeEn.split("\n");
+  let inCode = false;
+  lines.forEach((line, i) => {
+    if (line.trim().startsWith("```")) { inCode = !inCode; return; }
+    if (inCode || i === 0) return;
+    assert.ok(!ja.test(line), `README.en.md:${i + 1} に日本語が残っている: ${line.trim().slice(0, 50)}`);
+  });
+});
+
+test("英語版のテスト一覧も test/ の中身と一致する", () => {
+  const i = readmeEn.indexOf("| Test | What it checks |");
+  assert.notEqual(i, -1);
+  const block = readmeEn.slice(i, readmeEn.indexOf("\n\n", i));
+  const listed = tableRows(block).map((c) => c[0]).filter((c) => c.startsWith("`test/"))
+    .map((c) => c.replace(/`/g, ""));
+  const actual = readdirSync(join(ROOT, "test")).filter((f) => f.endsWith(".test.js"))
+    .map((f) => `test/${f}`);
+  assert.deepEqual(listed.sort(), actual.sort());
+});

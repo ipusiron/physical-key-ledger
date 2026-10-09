@@ -1,58 +1,31 @@
-// display.js - pure display helpers (no DOM, no IndexedDB)
-// Imported by ui.js for rendering and by test/ for verification.
+// display.js - pure display helpers (no DOM, no IndexedDB).
+// Every function that produces text takes the language, so the screen can be
+// redrawn in the other language without recomputing anything.
+
+import { t, fmt } from "./i18n.js";
 
 export const CATEGORIES = ["physical-key", "ic-card", "card-key"];
 export const STATUSES = ["stored", "loaned", "retired"];
 
-// Category-specific type options (value is stored, label is shown)
+// Which types belong to which category. The labels live in messages.js.
 export const TYPE_OPTIONS = {
-  "physical-key": [
-    { value: "master", label: "マスターキー" },
-    { value: "original", label: "純正キー" },
-    { value: "spare", label: "スペアキー" }
-  ],
-  "ic-card": [
-    { value: "employee", label: "社員証" },
-    { value: "visitor", label: "訪問者カード" },
-    { value: "contractor", label: "業者カード" },
-    { value: "temporary", label: "一時カード" },
-    { value: "other", label: "その他" }
-  ],
-  "card-key": [
-    { value: "room-key", label: "客室キー" },
-    { value: "access-card", label: "入館証" },
-    { value: "parking-card", label: "駐車場カード" },
-    { value: "locker-key", label: "ロッカーキー" },
-    { value: "other", label: "その他" }
-  ]
+  "physical-key": ["master", "original", "spare"],
+  "ic-card": ["employee", "visitor", "contractor", "temporary", "other"],
+  "card-key": ["room-key", "access-card", "parking-card", "locker-key", "other"]
 };
 
-const STATUS_LABELS = { stored: "保管中", loaned: "貸出中", retired: "廃止" };
+export const ALL_TYPES = [...new Set(Object.values(TYPE_OPTIONS).flat())];
 
-const CATEGORY_LABELS = {
-  "physical-key": "🔑 物理鍵",
-  "ic-card": "💳 ICカード",
-  "card-key": "🎫 カードキー"
-};
-
-const TYPE_LABELS = (() => {
-  const map = {};
-  for (const list of Object.values(TYPE_OPTIONS)) {
-    for (const opt of list) map[opt.value] = opt.label;
-  }
-  return map;
-})();
-
-export function translateStatus(status) {
-  return STATUS_LABELS[status] || status;
+export function translateStatus(lang, status) {
+  return t(lang, `status.${status}`, status);
 }
 
-export function translateCategory(category) {
-  return CATEGORY_LABELS[category] || category;
+export function translateCategory(lang, category) {
+  return t(lang, `cat.${category}`, category);
 }
 
-export function translateType(type) {
-  return TYPE_LABELS[type] || type;
+export function translateType(lang, type) {
+  return t(lang, `type.${type}`, type);
 }
 
 export function typeOptionsFor(category) {
@@ -71,23 +44,24 @@ const HOUR = 3600000;
 const DAY = 86400000;
 const WEEK = 604800000;
 
-// Relative time such as "3時間後" / "2日前". Falls back to an absolute
+// Relative time such as "3時間後" / "2 days ago". Falls back to an absolute
 // local date when the gap is a week or more.
-export function formatRelativeTime(ms, now) {
+export function formatRelativeTime(ms, now, lang = "ja") {
   if (!ms) return "";
   const diff = ms - now;
   const absDiff = Math.abs(diff);
+  const ahead = diff > 0;
   if (absDiff < HOUR) {
-    const minutes = Math.floor(absDiff / MINUTE);
-    return diff > 0 ? `${minutes}分後` : `${minutes}分前`;
+    return fmt(lang, ahead ? "fmt.in_minutes" : "fmt.ago_minutes", { n: Math.floor(absDiff / MINUTE) });
   }
   if (absDiff < DAY) {
-    const hours = Math.floor(absDiff / HOUR);
-    return diff > 0 ? `${hours}時間後` : `${hours}時間前`;
+    return fmt(lang, ahead ? "fmt.in_hours" : "fmt.ago_hours", { n: Math.floor(absDiff / HOUR) });
   }
   if (absDiff < WEEK) {
-    const days = Math.floor(absDiff / DAY);
-    return diff > 0 ? `${days}日後` : `${days}日前`;
+    const n = Math.floor(absDiff / DAY);
+    // English needs the singular: "in 1 day", not "in 1 days"
+    const suffix = n === 1 ? "_one" : "";
+    return fmt(lang, `${ahead ? "fmt.in_days" : "fmt.ago_days"}${suffix}`, { n });
   }
   return formatLocalDateTime(ms);
 }
@@ -121,11 +95,32 @@ export function toLocalDatetimeInput(ms) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-// Dashboard labels follow the configured threshold instead of a fixed "4".
-export function multiHoldingLabel(threshold) {
-  return `多重貸出(${threshold}本以上)`;
+// Dashboard labels follow the configured thresholds instead of being fixed
+// in the markup.
+export function multiHoldingLabel(lang, threshold) {
+  return fmt(lang, "fmt.multi_label", { n: threshold });
 }
 
-export function multiHoldingHeading(threshold) {
-  return `多重貸出（同一借主が${threshold}本以上保持）`;
+export function multiHoldingHeading(lang, threshold) {
+  return fmt(lang, "fmt.multi_heading", { n: threshold });
+}
+
+export function expiringHeading(lang, days) {
+  return fmt(lang, "fmt.expiring_heading", { n: days });
+}
+
+// "3日前に期限切れ" / "expires in 5 days"
+export function expiryPhrase(lang, card) {
+  if (card.expired) {
+    return card.daysOver === 0
+      ? t(lang, "fmt.expired_today")
+      : fmt(lang, "fmt.expired_days", { n: card.daysOver });
+  }
+  return card.daysLeft === 0
+    ? t(lang, "fmt.valid_today")
+    : fmt(lang, "fmt.valid_days", { n: card.daysLeft });
+}
+
+export function inconsistencyLabel(lang, kind) {
+  return t(lang, `notice.${kind}`, kind);
 }
