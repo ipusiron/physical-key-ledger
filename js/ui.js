@@ -590,15 +590,23 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Mobile menu toggle
   els.btnMenu.addEventListener("click", () => {
-    els.mobileMenu.classList.toggle("hidden");
+    const open = els.mobileMenu.classList.toggle("hidden") === false;
+    els.btnMenu.setAttribute("aria-expanded", String(open));
   });
 
   // Close mobile menu when clicking outside
   document.addEventListener("click", (e) => {
     if (!els.btnMenu.contains(e.target) && !els.mobileMenu.contains(e.target)) {
       els.mobileMenu.classList.add("hidden");
+      els.btnMenu.setAttribute("aria-expanded", "false");
     }
   });
+
+  // Cancel / close buttons inside the dialogs. These used to be inline
+  // onclick attributes, which a Content-Security-Policy blocks.
+  for (const btn of document.querySelectorAll("[data-close-dialog]")) {
+    btn.addEventListener("click", () => btn.closest("dialog")?.close());
+  }
 
   // Mobile menu actions (mirror desktop)
   els.btnExportMobile.addEventListener("click", () => { exportJson(); els.mobileMenu.classList.add("hidden"); });
