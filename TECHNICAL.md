@@ -33,13 +33,14 @@ Physical Key Ledger の技術的な実装詳細、アーキテクチャ、コア
 ### DB バージョン管理
 
 ```javascript
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 ```
 
 **マイグレーション戦略**:
 - `onupgradeneeded` イベントで段階的スキーマ更新
 - 既存データを保持しながらインデックス追加
 - v1 → v2: マルチカテゴリー対応（category, cardNumber, validUntil インデックス追加）
+- v2 → v3: 監査ストアの主キーをタイムスタンプから自動採番の `seq` へ変更し、`ts` はインデックスに移す。既存のエントリーはts順に積み直す
 
 ### ストア構造
 
@@ -88,19 +89,19 @@ keyPath: "loanId"
 #### 3. `audit` ストア（監査ログ）
 
 ```javascript
-keyPath: "ts"  // タイムスタンプ（ミリ秒）
+keyPath: "seq", autoIncrement: true  // 追記順の連番
 ```
 
 **インデックス一覧**:
 
 | インデックス名 | フィールド | 用途 |
 |----------------|------------|------|
-| by_ts_desc | ts | 時系列降順取得 |
+| by_ts | ts | 期間で絞り込む用途（将来用） |
 
 **設計ポイント**:
-- タイムスタンプをプライマリキーとして時系列保証
-- カーソルで `prev` 方向に走査することで降順取得
-- すべての変更操作（CRUD）を記録
+- 連番を主キーにして追記順を保証する。タイムスタンプを主キーにすると、同じミリ秒に書いた2件目が1件目を上書きして消える
+- カーソルを `prev` 方向に走査すると降順で取得できる
+- すべての変更操作（CRUD）を記録する
 
 #### 4. `meta` ストア（設定）
 
@@ -140,11 +141,13 @@ export function genUuid() {
 ### 2. 貸出ID 生成（タイムスタンプベース）
 
 ```javascript
-export function genLoanId() {
-  const d = new Date();
+export function genLoanId(date = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
-  const iso = `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-  return `L-${iso}-${Math.random().toString(36).slice(2, 6)}`;
+  const day = `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`;
+  const time = `${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+  const rnd = [...crypto.getRandomValues(new Uint8Array(2))]
+    .map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `L-${day}-${time}-${rnd}`;
 }
 ```
 
@@ -287,10 +290,8 @@ export async function createLoan({ keyUuid, borrower, dueAt, outNotes }) {
   if (key.status === "loaned") throw new Error("この鍵は既に貸出中です。");
 
   // 2. トランザクション内で複数操作
-  key.status = "loaned";
-  await dbApi.putKey(state.db, key);      // keys ストア更新
-  await dbApi.putLoan(state.db, loan);    // loans ストア追加
-  await dbApi.addAudit(state.db, {...});  // audit ストア追加
+  // keys / loans / audit を1つの readwrite トランザクションで書く
+  await dbApi.createLoanAtomic(state.db, { keyObj, loan, auditDraft }, sealAudit);
 
   // 3. キャッシュ同期
   await refreshCache();
@@ -298,8 +299,8 @@ export async function createLoan({ keyUuid, borrower, dueAt, outNotes }) {
 ```
 
 **保証**:
-- すべての操作が成功するか、すべて失敗するか（原子性）
-- エラー時は自動ロールバック
+- 3つのストアへの書き込みがすべて成功するか、すべて失敗するか（原子性）
+- 途中で失敗するとIndexedDBがトランザクションごと巻き戻すため、「状態は貸出中なのに貸出レコードがない」状態は残らない
 
 ---
 
@@ -416,23 +417,15 @@ export async function importAllReplace(db, dataset) {
 ### クライアントサイドフィルタリング
 
 ```javascript
-// ui.js 内での実装例
-function applyFilter() {
-  const query = els.searchBox.value.toLowerCase();
-  const category = els.filterCategory.value;
-  const status = els.filterStatus.value;
-
-  const filtered = state.cache.keys.filter(k => {
-    const match = !query ||
-      k.id.toLowerCase().includes(query) ||
-      k.name.toLowerCase().includes(query) ||
-      (k.cardNumber && k.cardNumber.toLowerCase().includes(query));
-    const catMatch = !category || k.category === category;
-    const stMatch = !status || k.status === status;
-    return match && catMatch && stMatch;
-  });
-
-  renderTable(filtered);
+// ui.js の keyMatchesFilter（実コード）
+function keyMatchesFilter(k, txt, category, status) {
+  const activeLoan = state.cache.loans.find(L => L.keyUuid === k.uuid && L.returnedAt == null);
+  const borrower = activeLoan?.borrower || "";
+  if (category && (k.category || "physical-key") !== category) return false;
+  if (status && k.status !== status) return false;
+  if (!txt) return true;
+  const hay = (k.id + " " + k.name + " " + (k.location || "") + " " + borrower).toLowerCase();
+  return hay.includes(txt.toLowerCase());
 }
 ```
 
@@ -483,16 +476,17 @@ export async function deleteKey(uuid) {
 
 ```javascript
 try {
-  await createLoan({ keyUuid, borrower, dueAt, outNotes });
-  showToast("貸出を登録しました", "ok");
+  await createLoan({ keyUuid: uuid, borrower, dueAt, outNotes });
+  els.dlgLoan.close();
+  await rerenderAll();
 } catch (err) {
-  showToast(err.message, "warn");
+  alert(err.message || String(err));
 }
 ```
 
 **パターン**:
-- すべての非同期操作を try-catch でラップ
-- トースト通知でユーザーにフィードバック
+- すべての非同期操作を try-catch でラップする
+- 失敗したときはモーダルを閉じず、`alert` で理由を出す（検証エラーは複数行で返る）
 
 ---
 
@@ -501,19 +495,23 @@ try {
 ### URL パラメーター処理
 
 ```javascript
-const url = new URL(location.href);
-if (url.searchParams.has("id")) {
-  const keyId = url.searchParams.get("id");
-  const key = await dbApi.getKeyById(state.db, keyId);
-  if (key) {
-    openKeyModal(false, key);
-  }
+// 鍵の識別子はフラグメントに載せる。サーバーへ送られないので、
+// 配信元のアクセスログに鍵のIDが残らない
+function readDeepLink() {
+  const url = new URL(location.href);
+  const hash = new URLSearchParams(url.hash.replace(/^#/, ""));
+  return {
+    id: hash.get("id") ?? url.searchParams.get("id"),
+    key: hash.get("key") ?? url.searchParams.get("key"),
+    hasQuery: url.search.length > 0 || url.hash.length > 0
+  };
 }
 ```
 
 **対応パラメーター**:
-- `?id=KEY-001` → 表示ID で検索
-- `?key=uuid-string` → UUID で検索（内部用）
+- `#id=KEY-001` → 表示IDで検索
+- `#key=uuid-string` → UUIDで検索（内部用）
+- `?id=` と `?key=` も読み取る（既存のラベルとの互換）。読み取ったあとは `history.replaceState` でURLから消す
 
 **使用例**:
 1. QR コード生成時に URL を埋め込み
@@ -528,9 +526,9 @@ if (url.searchParams.has("id")) {
 
 ```css
 @media (max-width: 760px) {
-  .app-header { grid-template-columns: auto 1fr auto; }
-  .table-wrapper { overflow-x: auto; }
-  .modal-content { width: 95%; max-height: 90vh; }
+  .grid-2 { grid-template-columns: 1fr; }
+  .modal { min-width: 92vw; }
+  .app-header { grid-template-columns: 1fr auto; }
 }
 ```
 
@@ -567,48 +565,49 @@ await refreshCache();
 
 ## 📦 外部依存ライブラリー
 
-| ライブラリー | バージョン | 用途 | CDN |
-|--------------|-----------|------|-----|
-| QRCode.js | 1.0.0 | QR コード生成 | cdnjs |
+| ライブラリー | バージョン | 用途 | 配置 |
+|---|---|---|---|
+| QRCode.js | 1.0.0 | QRコード生成 | `vendor/qrcode.min.js`（自己ホスト） |
 
 **最小限の依存**:
-- バンドラー不要（ES Modules で直接実行）
+- npmの依存パッケージはゼロ（`package.json` は `npm test` の定義だけ）
+- バンドラー不要（ES Modulesで直接実行）
 - フレームワークレス（Vanilla JS）
-- 軽量・高速起動
+- 外部CDNを使わない。CDNが差し替えられた場合に台帳のデータを読まれる経路を残さないため、
+  実ファイルを同梱し、出所とSHA-256を `vendor/README.md` に記録している
 
 ---
 
-## 🧪 テスト戦略（推奨）
+## 🧪 テスト
 
-本ツールは現在テストコードを含んでいませんが、以下のアプローチを推奨します：
+ロジックはDOMに触らない純粋モジュールに切り出してあり、Node.jsの標準テストランナーだけで回せる。依存パッケージはない。
 
-### 単体テスト
-
-```javascript
-// logic.test.js (例)
-import { genUuid, genLoanId, detectOverdue } from "./logic.js";
-
-test("UUID は重複しない", () => {
-  const ids = Array.from({ length: 1000 }, () => genUuid());
-  const unique = new Set(ids);
-  expect(unique.size).toBe(1000);
-});
-
-test("期限切れ検出が正しく動作する", () => {
-  const now = Date.now();
-  const loans = [
-    { returnedAt: null, dueAt: now - 1000 }, // 期限切れ
-    { returnedAt: null, dueAt: now + 1000 }, // 未来
-    { returnedAt: now, dueAt: now - 1000 },  // 返却済み
-  ];
-  // ...
-});
+```bash
+npm test   # node --test（Node.js 22以上）
 ```
 
-### E2E テスト
+### 構成
 
-- Playwright や Cypress を使用
-- 鍵登録 → 貸出 → 返却のフロー全体をテスト
+| ファイル | 対象 |
+|---|---|
+| `test/anomaly.test.js` | 期限超過・多重保持・期限切れカード・マスターキーの長期貸出・状態の食い違い・KPI |
+| `test/contrast.test.js` | CSS変数の配色のコントラスト比（ライト/ダーク/既定）と操作要素の寸法 |
+| `test/display.test.js` | ラベル変換・相対時間の境界・日時入力の往復と不正値の拒否 |
+| `test/format.test.js` | ソースの行長・行数・不可視文字の混入 |
+| `test/html.test.js` | CSPの指令・インライン属性の不在・スクリプトの出所・aria・主要なid |
+| `test/readme.test.js` | READMEの表の数値・ディレクトリー構造・画像参照・表記 |
+| `test/validate.test.js` | 不正なインポートデータの拒否（UUID形式・一意性・型） |
+
+### 方針
+
+- 期待値は実装を動かして確かめてから書く。テストに「こうなってほしい値」を書かない
+- 時刻に依存する関数は `now` を引数で受け取り、実行する時間帯やタイムゾーンで結果が変わらないようにする
+- READMEに書いた数値は `test/readme.test.js` が計算し直して照合する
+
+### 画面の確認
+
+画面まわり（CSP違反の有無・モーダル・QRコード・横あふれ・タップ領域）はPlaywrightで確認する。
+使い捨てのスクリプトはリポジトリーには置かない。
 
 ---
 
@@ -646,5 +645,4 @@ test("期限切れ検出が正しく動作する", () => {
 
 ---
 
-**Last Updated**: 2025-10-03
 **Maintainer**: Physical Key Ledger Development Team

@@ -8,20 +8,25 @@
   />
   <title>Physical Key Ledger</title>
   <meta name="description" content="Physical Key Ledger - 物理鍵管理台帳">
-  <!-- Security Headers -->
-  <meta http-equiv="X-Content-Type-Options" content="nosniff">
-  <meta http-equiv="X-Frame-Options" content="DENY">
-  <meta http-equiv="Referrer-Policy" content="no-referrer">
-  <meta name="robots" content="noindex, nofollow">
+  <!-- Content-Security-Policy: no external origin is contacted, so everything
+       comes from 'self'. frame-ancestors and X-Frame-Options are ignored in a
+       meta tag, so they are not written here. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <meta name="referrer" content="no-referrer">
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="./css/style.css" />
-  <!-- QRCode.js CDN -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
-  <!-- App scripts -->
-  <script src="./js/db.js" type="module"></script>
-  <script src="./js/logic.js" type="module"></script>
+  <!-- QRCode.js is self-hosted (see vendor/README.md) -->
+  <script src="./vendor/qrcode.min.js" defer></script>
+  <!-- App scripts: ui.js imports db.js and logic.js -->
   <script src="./js/ui.js" type="module"></script>
 </head>
 <body>
+  <noscript>
+    <p class="noscript-banner">
+      このツールはJavaScriptで台帳を読み書きします。JavaScriptを有効にしてから開いてください。
+      データはブラウザー内（IndexedDB）にのみ保存され、外部へは送信しません。
+    </p>
+  </noscript>
   <header class="app-header">
     <div class="header-left"></div>
     <div class="header-center">
@@ -40,7 +45,8 @@
       </label>
       <button id="btn-audit" class="btn btn-secondary">監査ログ</button>
       <button id="btn-settings" class="btn btn-tertiary">設定</button>
-      <button id="btn-menu" class="btn btn-tertiary mobile-menu-btn" aria-label="メニュー">☰</button>
+      <button id="btn-menu" class="btn btn-tertiary mobile-menu-btn" aria-label="メニュー"
+              aria-expanded="false" aria-controls="mobile-menu">☰</button>
     </div>
   </header>
 
@@ -64,7 +70,7 @@
     <section class="card" id="dashboard">
       <div class="card-header">
         <h2>ダッシュボード</h2>
-        <div class="kpi">
+        <div class="kpi" aria-live="polite">
           <div class="kpi-item">
             <div>総鍵数</div>
             <span id="kpi-total">0</span>
@@ -78,7 +84,7 @@
             <span id="kpi-overdue">0</span>
           </div>
           <div class="kpi-item warn">
-            <div>多重貸出(>3)</div>
+            <div id="kpi-multi-label">多重貸出(4本以上)</div>
             <span id="kpi-multi">0</span>
           </div>
         </div>
@@ -86,11 +92,11 @@
       <div class="card-body grid-2">
         <div>
           <h3>期限超過（返却期限を過ぎて未返却）</h3>
-          <ul id="list-overdue" class="bullet-list"></ul>
+          <ul id="list-overdue" class="bullet-list" aria-live="polite"></ul>
         </div>
         <div>
-          <h3>多重貸出（同一借主が4本以上保持）</h3>
-          <ul id="list-multi" class="bullet-list"></ul>
+          <h3 id="heading-multi">多重貸出（同一借主が4本以上保持）</h3>
+          <ul id="list-multi" class="bullet-list" aria-live="polite"></ul>
         </div>
       </div>
     </section>
@@ -100,14 +106,15 @@
       <div class="card-header">
         <h2>鍵一覧</h2>
         <div class="row">
-          <input id="search" type="search" class="input" placeholder="検索（ID/名称/場所/借主）">
-          <select id="filter-category" class="input">
+          <input id="search" type="search" class="input" placeholder="検索（ID/名称/場所/借主）"
+                 aria-label="鍵の検索（ID・名称・保管場所・借主）">
+          <select id="filter-category" class="input" aria-label="カテゴリーで絞り込む">
             <option value="">すべてのカテゴリー</option>
             <option value="physical-key">🔑 物理鍵</option>
             <option value="ic-card">💳 ICカード</option>
             <option value="card-key">🎫 カードキー</option>
           </select>
-          <select id="filter-status" class="input">
+          <select id="filter-status" class="input" aria-label="状態で絞り込む">
             <option value="">すべての状態</option>
             <option value="stored">保管中</option>
             <option value="loaned">貸出中</option>
@@ -181,7 +188,7 @@
       </div>
 
       <!-- Card-specific fields (conditional) -->
-      <div id="card-fields" class="grid-2" style="display: none;">
+      <div id="card-fields" class="grid-2 hidden">
         <label>カード番号（任意）
           <input name="cardNumber" class="input" placeholder="12345678">
         </label>
@@ -224,7 +231,7 @@
           <span class="delete-icon">🗑️</span> この鍵を削除
         </button>
         <menu class="modal-actions">
-          <button value="cancel" class="btn btn-tertiary" type="button" onclick="this.closest('dialog').close()">キャンセル</button>
+          <button value="cancel" class="btn btn-tertiary" type="button" data-close-dialog>キャンセル</button>
           <button id="btn-key-save" class="btn primary" type="submit">保存</button>
         </menu>
       </div>
@@ -257,7 +264,7 @@
         </label>
       </div>
       <menu class="modal-actions">
-        <button value="cancel" class="btn btn-tertiary" type="button" onclick="this.closest('dialog').close()">キャンセル</button>
+        <button value="cancel" class="btn btn-tertiary" type="button" data-close-dialog>キャンセル</button>
         <button id="btn-loan-save" class="btn primary" type="submit">登録</button>
       </menu>
     </form>
@@ -279,7 +286,7 @@
         </label>
       </div>
       <menu class="modal-actions">
-        <button value="cancel" class="btn btn-tertiary" type="button" onclick="this.closest('dialog').close()">キャンセル</button>
+        <button value="cancel" class="btn btn-tertiary" type="button" data-close-dialog>キャンセル</button>
         <button id="btn-return-save" class="btn primary" type="submit">回収</button>
       </menu>
     </form>
@@ -310,7 +317,7 @@
         </label>
       </div>
       <menu class="modal-actions">
-        <button value="cancel" class="btn btn-tertiary" type="button" onclick="this.closest('dialog').close()">閉じる</button>
+        <button value="cancel" class="btn btn-tertiary" type="button" data-close-dialog>閉じる</button>
         <button id="btn-settings-save" class="btn primary" type="submit">保存</button>
       </menu>
     </form>
@@ -398,8 +405,10 @@
             <li><strong>印刷と貼付</strong><br>
               「PNG保存」ボタンでQRコード画像を保存し、物理タグやラベルに印刷して鍵に貼付。</li>
             <li><strong>スマホでスキャン</strong><br>
-              スマホのQRコードリーダーでスキャンすると、自動的にその鍵の詳細画面（編集モーダル）が開きます。<br>
-              例: <code>?id=KEY-001</code> または <code>?key=uuid</code></li>
+              スキャンすると、その鍵の詳細画面（編集モーダル）が開きます。<br>
+              例: <code>#id=KEY-001</code> または <code>#key=uuid</code><br>
+              台帳データは端末ごとにブラウザー内へ保存されるため、<strong>詳細が開くのは台帳を登録した端末・ブラウザーだけ</strong>です。
+              別の端末でスキャンすると「台帳にありません」と表示されます。</li>
             <li><strong>2種類のQRコード</strong><br>
               「IDで生成」: タグ番号で検索（例: KEY-001）<br>
               「UUIDで生成」: 内部IDで検索（タグ番号変更にも対応）</li>

@@ -1,9 +1,16 @@
 // db.js - IndexedDB thin wrapper + schema
-// Exports: openDB, db API {keys, loans, audit, settings}
-// Stores: keys (by uuid), loans (by loanId), audit (ts desc index), meta (settings)
+// Exports: openDB, dbApi {keys, loans, audit, settings}
+// Stores: keys (by uuid), loans (by loanId), audit (auto seq, ts index), meta (settings)
+//
+// Every write that changes the ledger goes through one readwrite transaction
+// so that a failure in the middle cannot leave a key marked as loaned without
+// a matching loan record.
 
 export const DB_NAME = "physical-key-ledger";
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
+
+// Key of the chain head stored in "meta". See audit-chain.js.
+export const CHAIN_HEAD_KEY = "auditChainHead";
 
 export async function openDB() {
   return new Promise((resolve, reject) => {
@@ -12,11 +19,11 @@ export async function openDB() {
     req.onupgradeneeded = (e) => {
       const db = req.result;
       const oldVersion = e.oldVersion;
+      const upgradeTx = e.currentTarget.transaction;
 
       // keys store
-      let keysStore;
       if (!db.objectStoreNames.contains("keys")) {
-        keysStore = db.createObjectStore("keys", { keyPath: "uuid" });
+        const keysStore = db.createObjectStore("keys", { keyPath: "uuid" });
         keysStore.createIndex("by_id", "id", { unique: true });
         keysStore.createIndex("by_status", "status");
         keysStore.createIndex("by_name", "name");
@@ -24,8 +31,8 @@ export async function openDB() {
         keysStore.createIndex("by_cardNumber", "cardNumber", { unique: false });
         keysStore.createIndex("by_validUntil", "validUntil");
       } else if (oldVersion < 2) {
-        // Upgrade from v1 to v2: add new indices
-        keysStore = e.currentTarget.transaction.objectStore("keys");
+        // Upgrade from v1 to v2: add the indices introduced with card support
+        const keysStore = upgradeTx.objectStore("keys");
         if (!keysStore.indexNames.contains("by_category")) {
           keysStore.createIndex("by_category", "category");
         }
@@ -43,25 +50,60 @@ export async function openDB() {
         s.createIndex("by_keyUuid", "keyUuid");
         s.createIndex("by_borrower", "borrower");
         s.createIndex("by_active", "returnedAt");
-        // For overdue scan, we need dueAt index
         s.createIndex("by_dueAt", "dueAt");
-      }
-
-      // audit log store
-      if (!db.objectStoreNames.contains("audit")) {
-        const s = db.createObjectStore("audit", { keyPath: "ts" });
-        s.createIndex("by_ts_desc", "ts");
       }
 
       // meta/settings store
       if (!db.objectStoreNames.contains("meta")) {
         db.createObjectStore("meta", { keyPath: "key" });
       }
+
+      // audit log store.
+      // v1/v2 used the millisecond timestamp as the primary key, so two
+      // entries written in the same millisecond overwrote each other.
+      // v3 switches to an auto-incrementing sequence number and keeps ts
+      // as an index.
+      if (!db.objectStoreNames.contains("audit")) {
+        createAuditStore(db);
+      } else if (oldVersion < 3) {
+        migrateAuditStore(db, upgradeTx);
+      }
     };
 
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
+    req.onblocked = () => reject(new Error("ほかのタブが古いバージョンで開いています。ほかのタブを閉じてから再読み込みしてください。"));
   });
+}
+
+function createAuditStore(db) {
+  const s = db.createObjectStore("audit", { keyPath: "seq", autoIncrement: true });
+  s.createIndex("by_ts", "ts");
+  return s;
+}
+
+// Reads the old audit entries, rebuilds the store and writes them back in
+// timestamp order. Entries that shared a millisecond were already lost before
+// this migration runs; nothing here can bring them back.
+function migrateAuditStore(db, upgradeTx) {
+  const old = upgradeTx.objectStore("audit");
+  const collected = [];
+  old.openCursor().onsuccess = (ev) => {
+    const c = ev.target.result;
+    if (c) {
+      collected.push(c.value);
+      c.continue();
+      return;
+    }
+    db.deleteObjectStore("audit");
+    const s = createAuditStore(db);
+    collected.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    for (const entry of collected) {
+      const copy = { ...entry };
+      delete copy.seq;
+      s.add(copy);
+    }
+  };
 }
 
 // Helpers
@@ -72,161 +114,194 @@ function tx(db, mode, ...stores) {
   return { t, ...m };
 }
 
+function done(t, value) {
+  return new Promise((res, rej) => {
+    t.oncomplete = () => res(typeof value === "function" ? value() : value);
+    t.onerror = () => rej(t.error);
+    t.onabort = () => rej(t.error || new Error("トランザクションが中止されました。"));
+  });
+}
+
+function reqToPromise(r) {
+  return new Promise((res, rej) => {
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+
+function collect(store, out) {
+  store.openCursor().onsuccess = (e) => {
+    const c = e.target.result;
+    if (c) { out.push(c.value); c.continue(); }
+  };
+}
+
+// Appends one audit entry inside an existing transaction. The seal callback
+// receives the previous entry (or null) and returns the entry to store, which
+// is how the hash chain is built without a second transaction.
+export function appendAuditInTx(auditStore, draft, seal) {
+  auditStore.openCursor(null, "prev").onsuccess = (e) => {
+    const c = e.target.result;
+    const prev = c ? c.value : null;
+    const entry = seal ? seal(draft, prev) : draft;
+    auditStore.add(entry);
+  };
+}
+
 export const dbApi = {
   async getAllKeys(db) {
-    return new Promise((res, rej) => {
-      const { t, keys } = tx(db, "readonly", "keys");
-      const out = [];
-      keys.openCursor().onsuccess = (e) => {
-        const c = e.target.result;
-        if (c) { out.push(c.value); c.continue(); } else res(out);
-      };
-      t.onerror = () => rej(t.error);
-    });
+    const { t, keys } = tx(db, "readonly", "keys");
+    const out = [];
+    collect(keys, out);
+    return done(t, () => out);
   },
   async getKeyByUuid(db, uuid) {
-    return new Promise((res, rej) => {
-      const { t, keys } = tx(db, "readonly", "keys");
-      const r = keys.get(uuid);
-      r.onsuccess = () => res(r.result || null);
-      r.onerror = () => rej(r.error);
-    });
+    const { keys } = tx(db, "readonly", "keys");
+    return (await reqToPromise(keys.get(uuid))) || null;
   },
   async getKeyById(db, id) {
-    return new Promise((res, rej) => {
-      const { t, keys } = tx(db, "readonly", "keys");
-      const idx = keys.index("by_id").get(id);
-      idx.onsuccess = () => res(idx.result || null);
-      idx.onerror = () => rej(idx.error);
-    });
-  },
-  async putKey(db, keyObj) {
-    return new Promise((res, rej) => {
-      const { t, keys } = tx(db, "readwrite", "keys");
-      keys.put(keyObj);
-      t.oncomplete = () => res(true);
-      t.onerror = () => rej(t.error);
-    });
-  },
-  async deleteKey(db, uuid) {
-    return new Promise((res, rej) => {
-      const { t, keys } = tx(db, "readwrite", "keys");
-      keys.delete(uuid);
-      t.oncomplete = () => res(true);
-      t.onerror = () => rej(t.error);
-    });
+    const { keys } = tx(db, "readonly", "keys");
+    return (await reqToPromise(keys.index("by_id").get(id))) || null;
   },
 
   async getAllLoans(db) {
-    return new Promise((res, rej) => {
-      const { t, loans } = tx(db, "readonly", "loans");
-      const out = [];
-      loans.openCursor().onsuccess = (e) => {
-        const c = e.target.result;
-        if (c) { out.push(c.value); c.continue(); } else res(out);
-      };
-      t.onerror = () => rej(t.error);
-    });
+    const { t, loans } = tx(db, "readonly", "loans");
+    const out = [];
+    collect(loans, out);
+    return done(t, () => out);
   },
   async getActiveLoanByKey(db, keyUuid) {
-    // active: returnedAt == null
-    return new Promise((res, rej) => {
-      const { t, loans } = tx(db, "readonly", "loans");
-      const idx = loans.index("by_keyUuid");
-      const out = [];
-      idx.openCursor(IDBKeyRange.only(keyUuid)).onsuccess = (e) => {
-        const c = e.target.result;
-        if (c) {
-          if (c.value.returnedAt == null) out.push(c.value);
-          c.continue();
-        } else res(out[0] || null);
-      };
-      t.onerror = () => rej(t.error);
-    });
-  },
-  async putLoan(db, loanObj) {
-    return new Promise((res, rej) => {
-      const { t, loans } = tx(db, "readwrite", "loans");
-      loans.put(loanObj);
-      t.oncomplete = () => res(true);
-      t.onerror = () => rej(t.error);
-    });
-  },
-  async getLoansByBorrowerActive(db) {
-    // return Map<borrower, activeLoans[]>
-    const map = new Map();
-    const loans = await this.getAllLoans(db);
-    for (const L of loans) {
-      if (L.returnedAt == null) {
-        if (!map.has(L.borrower)) map.set(L.borrower, []);
-        map.get(L.borrower).push(L);
+    const { t, loans } = tx(db, "readonly", "loans");
+    const out = [];
+    loans.index("by_keyUuid").openCursor(IDBKeyRange.only(keyUuid)).onsuccess = (e) => {
+      const c = e.target.result;
+      if (c) {
+        if (c.value.returnedAt == null) out.push(c.value);
+        c.continue();
       }
-    }
-    return map;
+    };
+    return done(t, () => out[0] || null);
   },
 
-  async addAudit(db, entry) {
-    return new Promise((res, rej) => {
-      const { t, audit } = tx(db, "readwrite", "audit");
-      audit.put(entry);
-      t.oncomplete = () => res(true);
-      t.onerror = () => rej(t.error);
-    });
+  // --- atomic ledger operations ------------------------------------------
+  // keys + loans + audit are written in one transaction: either all of it
+  // lands or none of it does.
+
+  async putKeyWithAudit(db, keyObj, auditDraft, seal) {
+    const { t, keys, audit } = tx(db, "readwrite", "keys", "audit");
+    keys.put(keyObj);
+    appendAuditInTx(audit, auditDraft, seal);
+    return done(t, true);
+  },
+
+  async deleteKeyWithAudit(db, uuid, auditDraft, seal) {
+    const { t, keys, loans, audit } = tx(db, "readwrite", "keys", "loans", "audit");
+    let blocked = false;
+    loans.index("by_keyUuid").openCursor(IDBKeyRange.only(uuid)).onsuccess = (e) => {
+      const c = e.target.result;
+      if (c) {
+        if (c.value.returnedAt == null) { blocked = true; t.abort(); return; }
+        c.continue();
+        return;
+      }
+      keys.delete(uuid);
+      appendAuditInTx(audit, auditDraft, seal);
+    };
+    try {
+      return await done(t, true);
+    } catch (err) {
+      if (blocked) throw new Error("貸出中のため削除できません。先に回収してください。");
+      throw err;
+    }
+  },
+
+  async createLoanAtomic(db, { keyObj, loan, auditDraft }, seal) {
+    const { t, keys, loans, audit } = tx(db, "readwrite", "keys", "loans", "audit");
+    keys.put(keyObj);
+    loans.put(loan);
+    appendAuditInTx(audit, auditDraft, seal);
+    return done(t, true);
+  },
+
+  async returnLoanAtomic(db, { keyObj, loan, auditDraft }, seal) {
+    const { t, keys, loans, audit } = tx(db, "readwrite", "keys", "loans", "audit");
+    if (keyObj) keys.put(keyObj);
+    loans.put(loan);
+    appendAuditInTx(audit, auditDraft, seal);
+    return done(t, true);
+  },
+
+  async addAudit(db, auditDraft, seal) {
+    const { t, audit } = tx(db, "readwrite", "audit");
+    appendAuditInTx(audit, auditDraft, seal);
+    return done(t, true);
+  },
+
+  async getAllAuditAsc(db, limit = 100000) {
+    const { t, audit } = tx(db, "readonly", "audit");
+    const out = [];
+    audit.openCursor().onsuccess = (e) => {
+      const c = e.target.result;
+      if (c && out.length < limit) { out.push(c.value); c.continue(); }
+    };
+    return done(t, () => out);
   },
   async getAllAuditDesc(db, limit = 500) {
-    return new Promise((res, rej) => {
-      const { t, audit } = tx(db, "readonly", "audit");
-      const out = [];
-      audit.openCursor(null, "prev").onsuccess = (e) => {
-        const c = e.target.result;
-        if (c && out.length < limit) { out.push(c.value); c.continue(); }
-        else res(out);
-      };
-      t.onerror = () => rej(t.error);
-    });
+    const { t, audit } = tx(db, "readonly", "audit");
+    const out = [];
+    audit.openCursor(null, "prev").onsuccess = (e) => {
+      const c = e.target.result;
+      if (c && out.length < limit) { out.push(c.value); c.continue(); }
+    };
+    return done(t, () => out);
+  },
+  async getLastAudit(db) {
+    const { t, audit } = tx(db, "readonly", "audit");
+    let last = null;
+    audit.openCursor(null, "prev").onsuccess = (e) => {
+      const c = e.target.result;
+      if (c) last = c.value;
+    };
+    return done(t, () => last);
   },
 
   // settings
   async getSetting(db, key) {
-    return new Promise((res, rej) => {
-      const { t, meta } = tx(db, "readonly", "meta");
-      const r = meta.get(key);
-      r.onsuccess = () => res(r.result ? r.result.value : null);
-      r.onerror = () => rej(r.error);
-    });
+    const { meta } = tx(db, "readonly", "meta");
+    const r = await reqToPromise(meta.get(key));
+    return r ? r.value : null;
   },
   async setSetting(db, key, value) {
-    return new Promise((res, rej) => {
-      const { t, meta } = tx(db, "readwrite", "meta");
-      meta.put({ key, value });
-      t.oncomplete = () => res(true);
-      t.onerror = () => rej(t.error);
-    });
+    const { t, meta } = tx(db, "readwrite", "meta");
+    meta.put({ key, value });
+    return done(t, true);
   },
 
   // import/export
   async exportAll(db) {
     const [keys, loans, audit] = await Promise.all([
-      this.getAllKeys(db), this.getAllLoans(db), this.getAllAuditDesc(db, 100000),
+      this.getAllKeys(db), this.getAllLoans(db), this.getAllAuditAsc(db)
     ]);
     return { keys, loans, audit };
   },
-  async importAllReplace(db, dataset) {
-    return new Promise((res, rej) => {
-      const t = db.transaction(["keys", "loans", "audit"], "readwrite");
-      const sk = t.objectStore("keys");
-      const sl = t.objectStore("loans");
-      const sa = t.objectStore("audit");
 
-      // clear and put
-      sk.clear(); sl.clear(); sa.clear();
-
-      (dataset.keys || []).forEach((k) => sk.put(k));
-      (dataset.loans || []).forEach((l) => sl.put(l));
-      (dataset.audit || []).forEach((a) => sa.put(a));
-
-      t.oncomplete = () => res(true);
-      t.onerror = () => rej(t.error);
-    });
-  },
+  // The caller validates the dataset first (js/validate.js). Clearing and
+  // writing happen in the same transaction, so a failure leaves the previous
+  // ledger untouched.
+  async importAllReplace(db, dataset, auditDraft, seal) {
+    const { t, keys, loans, audit, meta } = tx(db, "readwrite", "keys", "loans", "audit", "meta");
+    keys.clear();
+    loans.clear();
+    audit.clear();
+    meta.delete(CHAIN_HEAD_KEY);
+    for (const k of dataset.keys || []) keys.put(k);
+    for (const l of dataset.loans || []) loans.put(l);
+    for (const a of dataset.audit || []) {
+      const copy = { ...a };
+      delete copy.seq;
+      audit.add(copy);
+    }
+    appendAuditInTx(audit, auditDraft, seal);
+    return done(t, true);
+  }
 };

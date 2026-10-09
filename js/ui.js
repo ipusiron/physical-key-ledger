@@ -3,10 +3,15 @@ import {
   initLogic, refreshCache, state, upsertKey, deleteKey,
   createLoan, returnLoanByKeyUuid, detectOverdue, detectMultiHolding, kpi,
   exportJson, importJsonFile, getAuditLog, saveSettings,
-  genUuid, toLocalDatetimeInput, fromLocalDatetime,
-  toggleTheme, applyTheme
+  genUuid, toggleTheme, applyTheme
 } from "./logic.js";
 import { dbApi } from "./db.js";
+import {
+  escapeHtml, translateCategory, translateStatus, translateType, typeOptionsFor,
+  formatRelativeTime, toLocalDatetimeInput, fromLocalDatetime,
+  multiHoldingLabel, multiHoldingHeading
+} from "./display.js";
+import { overdueHours } from "./anomaly.js";
 
 // Elements
 const els = {
@@ -16,6 +21,8 @@ const els = {
   kpiMulti: document.getElementById("kpi-multi"),
   listOverdue: document.getElementById("list-overdue"),
   listMulti: document.getElementById("list-multi"),
+  kpiMultiLabel: document.getElementById("kpi-multi-label"),
+  headingMulti: document.getElementById("heading-multi"),
   search: document.getElementById("search"),
   filterCategory: document.getElementById("filter-category"),
   filterStatus: document.getElementById("filter-status"),
@@ -75,30 +82,48 @@ function renderKPIs() {
   els.kpiOverdue.textContent = v.overdue;
   els.kpiMulti.textContent = v.multi;
 }
+
+// Labels that depend on the configured threshold are built from the setting
+// instead of being written into the HTML.
+function renderThresholdLabels() {
+  const n = state.settings.multiThreshold;
+  els.kpiMultiLabel.textContent = multiHoldingLabel(n);
+  els.headingMulti.textContent = multiHoldingHeading(n);
+}
+
+function emptyListItem(ul) {
+  ul.replaceChildren();
+  const li = document.createElement("li");
+  li.textContent = "なし";
+  ul.appendChild(li);
+}
+
 function renderAnomalies() {
   // overdue
-  const overdue = detectOverdue();
-  els.listOverdue.innerHTML = "";
+  const now = Date.now();
+  const overdue = detectOverdue(now);
   if (overdue.length === 0) {
-    els.listOverdue.innerHTML = `<li>なし</li>`;
+    emptyListItem(els.listOverdue);
   } else {
+    els.listOverdue.replaceChildren();
     for (const L of overdue) {
       const key = state.cache.keys.find(k => k.uuid === L.keyUuid);
       const li = document.createElement("li");
-      const hours = Math.floor((Date.now() - L.dueAt) / 36e5);
-      li.textContent = `返却期限を ${hours} 時間超過（${L.borrower} / ${key?.id || L.keyUuid}）`;
+      li.textContent = `返却期限を ${overdueHours(L, now)} 時間超過（${L.borrower} / ${key?.id || L.keyUuid}）`;
       els.listOverdue.appendChild(li);
     }
   }
   // multi
   const multi = detectMultiHolding();
-  els.listMulti.innerHTML = "";
   if (multi.length === 0) {
-    els.listMulti.innerHTML = `<li>なし</li>`;
+    emptyListItem(els.listMulti);
   } else {
+    els.listMulti.replaceChildren();
     for (const m of multi) {
       const li = document.createElement("li");
-      li.textContent = `同一借主が ${m.count} 本の鍵を保持（${m.borrower} / しきい値 ${state.settings.multiThreshold}）`;
+      const spellings = m.spellings.length > 1 ? `／表記ゆれ: ${m.spellings.join(", ")}` : "";
+      li.textContent =
+        `同一借主が ${m.count} 本の鍵を保持（${m.borrower} / しきい値 ${state.settings.multiThreshold}${spellings}）`;
       els.listMulti.appendChild(li);
     }
   }
@@ -129,7 +154,16 @@ function renderKeysTable() {
     const tr = document.createElement("tr");
     const activeLoan = state.cache.loans.find(L => L.keyUuid === k.uuid && L.returnedAt == null);
     const borrower = activeLoan?.borrower || "";
-    const dueAt = activeLoan?.dueAt ? formatRelativeTime(activeLoan.dueAt) : "";
+    const dueAt = activeLoan?.dueAt ? formatRelativeTime(activeLoan.dueAt, Date.now()) : "";
+    // Every interpolated value is escaped, including the uuid in the data
+    // attribute: imported data must not be able to inject markup here.
+    const uuid = escapeHtml(k.uuid);
+    // Retired keys cannot be lent out, so no loan button is offered.
+    const actionButton = k.status === "loaned"
+      ? `<button class="btn btn-secondary btn-sm" data-act="return" data-uuid="${uuid}">回収</button>`
+      : k.status === "stored"
+        ? `<button class="btn primary btn-sm" data-act="loan" data-uuid="${uuid}">貸出</button>`
+        : "";
 
     tr.innerHTML = `
       <td>${escapeHtml(k.id)}</td>
@@ -141,12 +175,8 @@ function renderKeysTable() {
       <td>${escapeHtml(borrower)}</td>
       <td>${escapeHtml(dueAt)}</td>
       <td class="row">
-        <button class="btn btn-tertiary btn-sm" data-act="edit" data-uuid="${k.uuid}">編集</button>
-        ${
-          k.status === "loaned"
-          ? `<button class="btn btn-secondary btn-sm" data-act="return" data-uuid="${k.uuid}">回収</button>`
-          : `<button class="btn primary btn-sm" data-act="loan" data-uuid="${k.uuid}">貸出</button>`
-        }
+        <button class="btn btn-tertiary btn-sm" data-act="edit" data-uuid="${uuid}">編集</button>
+        ${actionButton}
       </td>
     `;
     els.tbodyKeys.appendChild(tr);
@@ -160,158 +190,74 @@ function renderKeysTable() {
   }
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (m)=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m]));
-}
-
-function translateStatus(status) {
-  const map = { stored: "保管中", loaned: "貸出中", retired: "廃止" };
-  return map[status] || status;
-}
-
-function translateCategory(category) {
-  const map = {
-    "physical-key": "🔑 物理鍵",
-    "ic-card": "💳 ICカード",
-    "card-key": "🎫 カードキー"
-  };
-  return map[category] || category;
-}
-
-function translateType(type) {
-  const map = {
-    // Physical keys
-    master: "マスターキー",
-    original: "純正キー",
-    spare: "スペアキー",
-    // IC cards
-    employee: "社員証",
-    visitor: "訪問者カード",
-    contractor: "業者カード",
-    temporary: "一時カード",
-    // Card keys
-    "room-key": "客室キー",
-    "access-card": "入館証",
-    "parking-card": "駐車場カード",
-    "locker-key": "ロッカーキー",
-    // Other
-    other: "その他"
-  };
-  return map[type] || type;
-}
-
-// Category-specific type options
-const TYPE_OPTIONS = {
-  "physical-key": [
-    { value: "master", label: "マスターキー" },
-    { value: "original", label: "純正キー" },
-    { value: "spare", label: "スペアキー" }
-  ],
-  "ic-card": [
-    { value: "employee", label: "社員証" },
-    { value: "visitor", label: "訪問者カード" },
-    { value: "contractor", label: "業者カード" },
-    { value: "temporary", label: "一時カード" },
-    { value: "other", label: "その他" }
-  ],
-  "card-key": [
-    { value: "room-key", label: "客室キー" },
-    { value: "access-card", label: "入館証" },
-    { value: "parking-card", label: "駐車場カード" },
-    { value: "locker-key", label: "ロッカーキー" },
-    { value: "other", label: "その他" }
-  ]
-};
-
-function updateTypeOptions(category) {
+// Rebuilds the type <select> for the chosen category. Options are created as
+// elements (no innerHTML) so that labels cannot be read as markup.
+function updateTypeOptions(category, selected) {
   const typeSelect = document.getElementById("key-type");
   const cardFields = document.getElementById("card-fields");
-  const options = TYPE_OPTIONS[category] || TYPE_OPTIONS["physical-key"];
-
-  typeSelect.innerHTML = options.map(opt =>
-    `<option value="${opt.value}">${opt.label}</option>`
-  ).join("");
-
-  // Show/hide card-specific fields
-  if (category === "ic-card" || category === "card-key") {
-    cardFields.style.display = "grid";
-  } else {
-    cardFields.style.display = "none";
+  typeSelect.replaceChildren();
+  for (const opt of typeOptionsFor(category)) {
+    const el = document.createElement("option");
+    el.value = opt.value;
+    el.textContent = opt.label;
+    typeSelect.appendChild(el);
   }
-}
+  if (selected) typeSelect.value = selected;
 
-function formatRelativeTime(ms) {
-  if (!ms) return "";
-  const now = Date.now();
-  const diff = ms - now;
-  const absDiff = Math.abs(diff);
-
-  const minutes = Math.floor(absDiff / 60000);
-  const hours = Math.floor(absDiff / 3600000);
-  const days = Math.floor(absDiff / 86400000);
-
-  if (absDiff < 3600000) { // < 1 hour
-    return diff > 0 ? `${minutes}分後` : `${minutes}分前`;
-  } else if (absDiff < 86400000) { // < 1 day
-    return diff > 0 ? `${hours}時間後` : `${hours}時間前`;
-  } else if (absDiff < 604800000) { // < 1 week
-    return diff > 0 ? `${days}日後` : `${days}日前`;
-  } else {
-    // Fallback to formatted date
-    const d = new Date(ms);
-    const pad = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }
+  // Card-only fields are toggled with a class so that no inline style
+  // attribute is needed (Content-Security-Policy blocks those).
+  const isCard = category === "ic-card" || category === "card-key";
+  cardFields.classList.toggle("hidden", !isCard);
 }
 
 async function rerenderAll() {
   await refreshCache();
+  renderThresholdLabels();
   renderKPIs();
   renderAnomalies();
   renderKeysTable();
 }
 
 // ============ Key modal ============
-function openKeyModal(newKey=true, keyObj=null) {
+// Fields are reached through form.elements so that an <input name="id">
+// cannot shadow a DOM property of the form itself.
+function field(form, name) {
+  return form.elements.namedItem(name);
+}
+
+function openKeyModal(newKey = true, keyObj = null) {
   isNewKey = newKey;
   els.dlgKeyTitle.textContent = newKey ? "鍵の新規登録" : "鍵の編集";
   const form = els.formKey;
+  const set = (name, value) => { field(form, name).value = value; };
+  const blanks = ["id", "name", "location", "notes", "cardNumber", "accessLevel", "validFrom", "validUntil"];
   if (newKey) {
     currentKeyUuid = genUuid();
-    form.id.value = "";
-    form.name.value = "";
-    form.category.value = "physical-key";
-    form.type.value = "original";
-    form.status.value = "stored";
-    form.location.value = "";
-    form.notes.value = "";
-    form.cardNumber.value = "";
-    form.accessLevel.value = "";
-    form.validFrom.value = "";
-    form.validUntil.value = "";
-    updateTypeOptions("physical-key");
+    for (const name of blanks) set(name, "");
+    set("category", "physical-key");
+    set("status", "stored");
+    updateTypeOptions("physical-key", "original");
   } else {
     currentKeyUuid = keyObj.uuid;
-    form.id.value = keyObj.id;
-    form.name.value = keyObj.name;
+    set("id", keyObj.id);
+    set("name", keyObj.name);
     const category = keyObj.category || "physical-key";
-    form.category.value = category;
-    updateTypeOptions(category);
-    form.type.value = keyObj.type;
-    form.status.value = keyObj.status;
-    form.location.value = keyObj.location || "";
-    form.notes.value = keyObj.notes || "";
-    form.cardNumber.value = keyObj.cardNumber || "";
-    form.accessLevel.value = keyObj.accessLevel || "";
-    form.validFrom.value = keyObj.validFrom ? toLocalDatetimeInput(keyObj.validFrom) : "";
-    form.validUntil.value = keyObj.validUntil ? toLocalDatetimeInput(keyObj.validUntil) : "";
+    set("category", category);
+    updateTypeOptions(category, keyObj.type);
+    set("status", keyObj.status);
+    set("location", keyObj.location || "");
+    set("notes", keyObj.notes || "");
+    set("cardNumber", keyObj.cardNumber || "");
+    set("accessLevel", keyObj.accessLevel || "");
+    set("validFrom", keyObj.validFrom ? toLocalDatetimeInput(keyObj.validFrom) : "");
+    set("validUntil", keyObj.validUntil ? toLocalDatetimeInput(keyObj.validUntil) : "");
   }
   clearQR();
   els.dlgKey.showModal();
 }
 
 function clearQR() {
-  els.qrBox.innerHTML = "";
+  els.qrBox.replaceChildren();
   els.qrInfo.textContent = "";
   els.qrInfo.classList.remove("show");
   qrInstance = null;
@@ -325,16 +271,60 @@ function ensureQR() {
     qrInstance = new QRCode(els.qrBox, { text: "", width: 170, height: 170 });
   }
 }
-function makeQrContentId() {
-  const id = els.formKey.id.value.trim();
+// The key is put in the fragment (#), which browsers do not send to the
+// server. With "?" the key ID would appear in the access log of whoever
+// hosts the page.
+function qrUrl(name, value) {
   const url = new URL(location.href);
-  url.searchParams.set("id", id);
+  url.search = "";
+  url.hash = `${name}=${encodeURIComponent(value)}`;
   return url.toString();
 }
+function makeQrContentId() {
+  return qrUrl("id", field(els.formKey, "id").value.trim());
+}
 function makeQrContentUuid() {
+  return qrUrl("key", currentKeyUuid);
+}
+
+// Reads #id= / #key= first and still understands the older ?id= / ?key=
+// links printed on existing labels.
+function readDeepLink() {
   const url = new URL(location.href);
-  url.searchParams.set("key", currentKeyUuid);
-  return url.toString();
+  const hash = new URLSearchParams(url.hash.replace(/^#/, ""));
+  return {
+    id: hash.get("id") ?? url.searchParams.get("id"),
+    key: hash.get("key") ?? url.searchParams.get("key"),
+    hasQuery: url.search.length > 0 || url.hash.length > 0
+  };
+}
+
+const NOT_ON_THIS_DEVICE =
+  "台帳データは端末ごとに保存されるため、登録した端末・ブラウザーで開いてください。";
+
+// Opens the key named by the current URL, then takes it out of the address bar.
+async function handleDeepLink() {
+  const link = readDeepLink();
+  if (link.id != null) {
+    const key = await dbApi.getKeyById(state.db, link.id);
+    if (key) openKeyModal(false, key);
+    else alert([`鍵ID「${link.id}」はこの端末の台帳にありません。`, NOT_ON_THIS_DEVICE].join("\n"));
+  } else if (link.key != null) {
+    const key = await dbApi.getKeyByUuid(state.db, link.key);
+    if (key) openKeyModal(false, key);
+    else alert([`鍵UUID「${link.key}」はこの端末の台帳にありません。`, NOT_ON_THIS_DEVICE].join("\n"));
+  }
+  if (link.hasQuery) clearDeepLink();
+}
+
+// Removes the key from the address bar and from the back/forward history.
+// The browser history of the visit itself still holds the original URL.
+function clearDeepLink() {
+  try {
+    history.replaceState(null, "", location.pathname);
+  } catch {
+    // Some sandboxes block replaceState; the page still works.
+  }
 }
 function downloadQrPng() {
   const img = els.qrBox.querySelector("img") || els.qrBox.querySelector("canvas");
@@ -348,10 +338,10 @@ function downloadQrPng() {
 // ============ Loan modal ============
 function openLoanModal(k) {
   const f = els.formLoan;
-  f.keyId.value = `${k.id} (${k.uuid.slice(0,8)})`;
-  f.borrower.value = "";
-  f.dueAt.value = "";
-  f.outNotes.value = "";
+  field(f, "keyId").value = `${k.id} (${k.uuid.slice(0, 8)})`;
+  field(f, "borrower").value = "";
+  field(f, "dueAt").value = "";
+  field(f, "outNotes").value = "";
   els.dlgLoan.showModal();
   els.formLoan.dataset.uuid = k.uuid;
 }
@@ -359,9 +349,9 @@ function openLoanModal(k) {
 // ============ Return modal ============
 function openReturnModal(k, activeLoan) {
   const f = els.formReturn;
-  f.keyId.value = `${k.id} (${k.uuid.slice(0,8)})`;
-  f.borrower.value = activeLoan?.borrower || "";
-  f.inNotes.value = "";
+  field(f, "keyId").value = `${k.id} (${k.uuid.slice(0, 8)})`;
+  field(f, "borrower").value = activeLoan?.borrower || "";
+  field(f, "inNotes").value = "";
   els.dlgReturn.showModal();
   els.formReturn.dataset.uuid = k.uuid;
 }
@@ -377,8 +367,8 @@ async function openAuditModal() {
 // ============ Settings modal ============
 function openSettingsModal() {
   const f = els.formSettings;
-  f.profileName.value = state.settings.profileName || "local-admin";
-  f.multiThreshold.value = state.settings.multiThreshold || 4;
+  field(f, "profileName").value = state.settings.profileName || "local-admin";
+  field(f, "multiThreshold").value = state.settings.multiThreshold || 4;
   els.dlgSettings.showModal();
 }
 
@@ -396,25 +386,11 @@ window.addEventListener("DOMContentLoaded", async () => {
   applyTheme();
   updateThemeIcon();
 
-  // Auto-open key detail from URL params (?id=KEY-001 or ?key=uuid)
-  const url = new URL(location.href);
-  if (url.searchParams.has("id")) {
-    const keyId = url.searchParams.get("id");
-    const key = await dbApi.getKeyById(state.db, keyId);
-    if (key) {
-      openKeyModal(false, key);
-    } else {
-      alert(`鍵ID「${keyId}」が見つかりませんでした。`);
-    }
-  } else if (url.searchParams.has("key")) {
-    const keyUuid = url.searchParams.get("key");
-    const key = await dbApi.getKeyByUuid(state.db, keyUuid);
-    if (key) {
-      openKeyModal(false, key);
-    } else {
-      alert(`鍵UUID「${keyUuid}」が見つかりませんでした。`);
-    }
-  }
+  // Auto-open the key detail from a scanned label (#id=KEY-001 or #key=uuid)
+  await handleDeepLink();
+  // A label scanned while the page is already open only changes the
+  // fragment, which does not reload the document.
+  window.addEventListener("hashchange", () => { handleDeepLink(); });
 
   // Render
   await rerenderAll();
@@ -454,27 +430,27 @@ window.addEventListener("DOMContentLoaded", async () => {
   els.formKey.addEventListener("submit", async (e) => {
     e.preventDefault();
     const f = els.formKey;
-    const category = f.category.value;
+    const value = (name) => field(f, name).value;
+    const category = value("category");
     const obj = {
       uuid: currentKeyUuid,
-      id: f.id.value.trim(),
-      name: f.name.value.trim(),
+      id: value("id").trim(),
+      name: value("name").trim(),
       category: category,
-      type: f.type.value,
-      status: f.status.value,
-      location: f.location.value.trim(),
-      notes: f.notes.value.trim(),
+      type: value("type"),
+      status: value("status"),
+      location: value("location").trim(),
+      notes: value("notes").trim(),
     };
 
     // Add card-specific fields if category is ic-card or card-key
     if (category === "ic-card" || category === "card-key") {
-      obj.cardNumber = f.cardNumber.value.trim() || null;
-      obj.accessLevel = f.accessLevel.value.trim() || null;
-      obj.validFrom = fromLocalDatetime(f.validFrom.value) || null;
-      obj.validUntil = fromLocalDatetime(f.validUntil.value) || null;
+      obj.cardNumber = value("cardNumber").trim() || null;
+      obj.accessLevel = value("accessLevel").trim() || null;
+      obj.validFrom = fromLocalDatetime(value("validFrom")) || null;
+      obj.validUntil = fromLocalDatetime(value("validUntil")) || null;
     }
 
-    if (!obj.id || !obj.name) return alert("IDと名称は必須です。");
     try {
       await upsertKey(obj, isNewKey);
       els.dlgKey.close();
@@ -517,12 +493,12 @@ window.addEventListener("DOMContentLoaded", async () => {
   els.formLoan.addEventListener("submit", async (e) => {
     e.preventDefault();
     const f = els.formLoan;
-    const borrower = f.borrower.value.trim();
+    const borrower = field(f, "borrower").value.trim();
     if (!borrower) return alert("借主識別子を入力してください。");
-    const dueAt = fromLocalDatetime(f.dueAt.value);
+    const dueAt = fromLocalDatetime(field(f, "dueAt").value);
     const uuid = els.formLoan.dataset.uuid;
     try {
-      await createLoan({ keyUuid: uuid, borrower, dueAt, outNotes: f.outNotes.value.trim() });
+      await createLoan({ keyUuid: uuid, borrower, dueAt, outNotes: field(f, "outNotes").value.trim() });
       els.dlgLoan.close();
       await rerenderAll();
     } catch (err) {
@@ -535,7 +511,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     e.preventDefault();
     const uuid = els.formReturn.dataset.uuid;
     try {
-      await returnLoanByKeyUuid(uuid, els.formReturn.inNotes.value.trim());
+      await returnLoanByKeyUuid(uuid, field(els.formReturn, "inNotes").value.trim());
       els.dlgReturn.close();
       await rerenderAll();
     } catch (err) {
@@ -545,20 +521,27 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Export / Import / Audit / Settings
   els.btnExport.addEventListener("click", exportJson);
-  els.fileImport.addEventListener("change", async (e) => {
+  async function handleImportFile(e, closeMenu) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!confirm("JSONデータで全置換します。よろしいですか？")) return;
+    if (!confirm("JSONデータで全置換します。よろしいですか？")) {
+      e.target.value = "";
+      if (closeMenu) els.mobileMenu.classList.add("hidden");
+      return;
+    }
     try {
-      await importJsonFile(file);
+      const counts = await importJsonFile(file);
       await rerenderAll();
-      alert("インポート完了");
+      alert(`インポート完了（鍵 ${counts.keys} 件 / 貸出 ${counts.loans} 件 / 監査ログ ${counts.audit} 件）`);
     } catch (err) {
-      alert("インポート失敗: " + (err.message || String(err)));
+      alert(["インポート失敗", err.message || String(err)].join("\n"));
     } finally {
       e.target.value = "";
+      if (closeMenu) els.mobileMenu.classList.add("hidden");
     }
-  });
+  }
+
+  els.fileImport.addEventListener("change", (e) => handleImportFile(e, false));
   els.btnAudit.addEventListener("click", openAuditModal);
   els.btnAuditClose.addEventListener("click", () => els.dlgAudit.close());
   els.btnAuditDownload.addEventListener("click", async () => {
@@ -579,8 +562,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     e.preventDefault();
     const f = els.formSettings;
     await saveSettings({
-      profileName: f.profileName.value.trim(),
-      multiThreshold: Number(f.multiThreshold.value) || 4,
+      profileName: field(f, "profileName").value.trim(),
+      multiThreshold: Number(field(f, "multiThreshold").value) || 4,
     });
     els.dlgSettings.close();
     await rerenderAll();
@@ -607,33 +590,27 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Mobile menu toggle
   els.btnMenu.addEventListener("click", () => {
-    els.mobileMenu.classList.toggle("hidden");
+    const open = els.mobileMenu.classList.toggle("hidden") === false;
+    els.btnMenu.setAttribute("aria-expanded", String(open));
   });
 
   // Close mobile menu when clicking outside
   document.addEventListener("click", (e) => {
     if (!els.btnMenu.contains(e.target) && !els.mobileMenu.contains(e.target)) {
       els.mobileMenu.classList.add("hidden");
+      els.btnMenu.setAttribute("aria-expanded", "false");
     }
   });
 
+  // Cancel / close buttons inside the dialogs. These used to be inline
+  // onclick attributes, which a Content-Security-Policy blocks.
+  for (const btn of document.querySelectorAll("[data-close-dialog]")) {
+    btn.addEventListener("click", () => btn.closest("dialog")?.close());
+  }
+
   // Mobile menu actions (mirror desktop)
   els.btnExportMobile.addEventListener("click", () => { exportJson(); els.mobileMenu.classList.add("hidden"); });
-  els.fileImportMobile.addEventListener("change", async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!confirm("JSONデータで全置換します。よろしいですか？")) return;
-    try {
-      await importJsonFile(file);
-      await rerenderAll();
-      alert("インポート完了");
-    } catch (err) {
-      alert("インポート失敗: " + (err.message || String(err)));
-    } finally {
-      e.target.value = "";
-      els.mobileMenu.classList.add("hidden");
-    }
-  });
+  els.fileImportMobile.addEventListener("change", (e) => handleImportFile(e, true));
   els.btnAuditMobile.addEventListener("click", () => { openAuditModal(); els.mobileMenu.classList.add("hidden"); });
   els.btnSettingsMobile.addEventListener("click", () => { openSettingsModal(); els.mobileMenu.classList.add("hidden"); });
 });
