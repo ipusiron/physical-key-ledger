@@ -36,19 +36,9 @@ export async function initLogic() {
   if (soon != null) state.settings.expiringSoonDays = clampInt(soon, 0, 365, 7);
   if (master != null) state.settings.masterLoanDays = clampInt(master, 1, 365, 7);
 
-  // Theme lives in localStorage so that it applies before the database opens.
-  let savedTheme = null;
-  try {
-    savedTheme = localStorage.getItem("theme");
-  } catch {
-    savedTheme = null;
-  }
-  if (savedTheme === "light" || savedTheme === "dark") {
-    state.theme = savedTheme;
-  } else {
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    state.theme = prefersDark ? "dark" : "light";
-  }
+  // The theme (saved choice, else the OS setting) is decided before the first
+  // paint by js/theme-init.js in <head>; take it over from the <html> attribute.
+  state.theme = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
 
   await refreshCache();
 }

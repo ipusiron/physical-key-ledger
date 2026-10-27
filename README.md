@@ -642,6 +642,7 @@ physical-key-ledger/
 │   ├── logic.js                  # 台帳の操作（登録・貸出・回収・入出力・設定）
 │   ├── messages.js               # 日本語と英語の文言（画面・エラー・ヘルプ）
 │   ├── sha256.js                 # SHA-256の実装（依存なし・同期）
+│   ├── theme-init.js             # 最初の描画の前にテーマ（ダーク/ライト）を決める
 │   ├── ui.js                     # 画面の組み立てとイベント処理
 │   └── validate.js               # インポートとフォーム入力の検査（純粋関数）
 ├── test/                         # 自動テスト（node:test、依存なし）
@@ -654,6 +655,7 @@ physical-key-ledger/
 │   ├── i18n.test.js              # 日英の辞書の整合と言語の選び方
 │   ├── readme.test.js            # READMEの表・ツリー・画像参照・表記
 │   ├── sha256.test.js            # NISTのテストベクターとnode:cryptoとの一致
+│   ├── theme-init.test.js        # 最初のテーマの判定（OSの設定・保存値）と読み込み位置
 │   └── validate.test.js          # 不正なインポートデータの拒否
 ├── vendor/                       # 同梱した外部ライブラリー
 │   ├── LICENSE-qrcodejs.txt      # QRCode.js のライセンス（MIT）
@@ -705,6 +707,7 @@ npm test     # node --test
 | `test/i18n.test.js` | 日英の辞書のキー整合・差し込み・タグ数、言語の選び方 |
 | `test/readme.test.js` | READMEの表・ディレクトリー構造・画像参照・表記 |
 | `test/sha256.test.js` | SHA-256の実装（NISTのテストベクター、node:cryptoとの突き合わせ） |
+| `test/theme-init.test.js` | 最初のテーマの判定（保存値の優先・OSの設定・想定外の値）と、`<head>` での読み込み位置 |
 | `test/validate.test.js` | 不正なインポートデータの拒否（UUID形式・一意性・型） |
 
 ---
