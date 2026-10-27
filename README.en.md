@@ -597,6 +597,7 @@ physical-key-ledger/
 │   ├── logic.js                  # Ledger operations (register, lend, return, import/export)
 │   ├── messages.js               # Japanese and English text (screen, errors, help)
 │   ├── sha256.js                 # SHA-256 (no dependencies, synchronous)
+│   ├── theme-init.js             # Sets the theme (dark/light) before the first paint
 │   ├── ui.js                     # Rendering and event handling
 │   └── validate.js               # Validation of imports and form input (pure)
 ├── test/                         # Tests (node:test, no dependencies)
@@ -609,6 +610,7 @@ physical-key-ledger/
 │   ├── i18n.test.js              # Dictionary parity and language selection
 │   ├── readme.test.js            # README tables, tree, images, wording
 │   ├── sha256.test.js            # NIST test vectors and node:crypto
+│   ├── theme-init.test.js        # Initial theme choice (OS setting, saved value) and where it is loaded
 │   └── validate.test.js          # Rejecting invalid import data
 ├── vendor/                       # Bundled third-party library
 │   ├── LICENSE-qrcodejs.txt      # QRCode.js licence (MIT)
@@ -660,6 +662,7 @@ npm test     # node --test
 | `test/i18n.test.js` | Dictionary parity, placeholders, tag counts, language selection |
 | `test/readme.test.js` | README tables, directory tree, image references, wording |
 | `test/sha256.test.js` | SHA-256 against the NIST vectors and against node:crypto |
+| `test/theme-init.test.js` | Initial theme choice (saved value first, OS setting, unexpected values) and where it is loaded in `<head>` |
 | `test/validate.test.js` | Rejecting invalid import data (UUID format, uniqueness, types) |
 
 ---

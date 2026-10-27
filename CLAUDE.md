@@ -32,7 +32,8 @@ Physical Key Ledger is a browser-based ledger for physical keys, IC cards and ca
 4. **js/db.js** — IndexedDB wrapper. Stores: `keys` (keyPath `uuid`), `loans` (keyPath `loanId`), `audit` (keyPath `seq`, autoIncrement, index `by_ts`), `meta` (settings).
    Every ledger change goes through a single readwrite transaction (`putKeyWithAudit`, `deleteKeyWithAudit`, `createLoanAtomic`, `returnLoanAtomic`, `importAllReplace`), so a key cannot end up marked as loaned without a matching loan record.
 5. **js/logic.js** — domain operations on top of the pure modules: `upsertKey`, `deleteKey`, `createLoan`, `returnLoanByKeyUuid`, `exportJson`, `importJsonFile`, settings and theme.
-6. **js/ui.js** — the only file that touches the DOM. Rendering, modals, QR codes, deep links, language switching.
+6. **js/ui.js** — the only module that touches the DOM. Rendering, modals, QR codes, deep links, language switching.
+7. **js/theme-init.js** — classic (non-module) script loaded synchronously in `<head>` right after the stylesheet. Sets `data-theme` on `<html>` and, via a MutationObserver, on `<body>` as soon as it is parsed, so the first paint already uses the right theme. `logic.js` reads the value from `<html>`.
 
 ### Database versions
 

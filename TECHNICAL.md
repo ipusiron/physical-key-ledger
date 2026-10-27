@@ -308,13 +308,14 @@ export async function createLoan({ keyUuid, borrower, dueAt, outNotes }) {
 
 ### ダークモード優先設計
 
-```javascript
-// デフォルトはダークテーマ
-state.theme = "dark";
+テーマは `<head>` で同期読み込みする `js/theme-init.js` が、最初の描画の前に決めます（保存した選択が優先、なければOSの設定）。
 
-// システム設定を検出
-const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-state.theme = prefersDark ? "dark" : "light";
+```javascript
+// js/theme-init.js（抜粋）
+var prefersDark = !!(global.matchMedia && global.matchMedia("(prefers-color-scheme: dark)").matches);
+var theme = (saved === "light" || saved === "dark") ? saved : (prefersDark ? "dark" : "light");
+root.setAttribute("data-theme", theme);
+// <body> は MutationObserver で、パーサーが挿入した直後（描画の前）に同じ値を付ける
 ```
 
 **CSS カスタムプロパティー**:
